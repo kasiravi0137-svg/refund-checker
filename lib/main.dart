@@ -54,134 +54,170 @@ String fillJs(String pan, String pwd) => '''
 ''';
 
 // ---- Post-login automation driver ----
-// Runs entirely inside the SPA. Reports back through the 'Refund' JS channel:
-//   {t:'dash', name, mobile, email}
-//   {t:'status', status, date}
-//   {t:'err', msg}
-//   {t:'log', msg}
-// NOTE: the menu/dropdown selectors are best-effort. If a step stalls it posts
-// an 'err' and the manual Capture button stays available as a fallback.
+// Runs inside the Angular SPA. Reports back through the 'Refund' JS channel:
+//   {t:'dash', name, mobile, email}  {t:'status', status, date}
+//   {t:'err', msg}                   {t:'log', msg}
 String autoJs() => '''
 (function(){
  function post(o){try{Refund.postMessage(JSON.stringify(o))}catch(e){}}
  function all(sel){return [].slice.call(document.querySelectorAll(sel));}
- function vis(el){if(!el)return false;var r=el.getBoundingClientRect();return r.width>0&&r.height>0;}
- function findByText(sel,txt){txt=txt.toLowerCase();return all(sel).find(function(e){return (e.innerText||e.textContent||'').toLowerCase().indexOf(txt)>-1;});}
- function clickEl(e){if(!e)return false;try{e.scrollIntoView({block:'center'});}catch(x){} try{e.click();}catch(y){return false;} return true;}
+ function textOf(e){return ((e&&(e.innerText||e.textContent))||'').trim();}
  function text(){return document.body.innerText||'';}
-
- var step='dash', tick=0, acted=-50, done=false, dashSent=false;
- function ready(w){return tick-acted>w;}
- function act(){acted=tick;}
-
+ function visible(e){
+   if(!e)return false;
+   try{var cs=getComputedStyle(e);if(cs.visibility==='hidden'||cs.display==='none')return false;
+       if(e.offsetParent===null&&cs.position!=='fixed')return false;}catch(x){}
+   var r=e.getBoundingClientRect();return r.width>1&&r.height>1;
+ }
+ function clickable(e){
+   var n=e;
+   for(var i=0;i<6&&n;i++){
+     var tag=n.tagName?n.tagName.toLowerCase():'';
+     if(tag==='a'||tag==='button')return n;
+     if(n.getAttribute){
+       var role=n.getAttribute('role');
+       if(role==='button'||role==='menuitem'||role==='link')return n;
+       if(n.hasAttribute('routerlink')||n.hasAttribute('ng-reflect-router-link')||n.hasAttribute('onclick'))return n;
+     }
+     try{if(getComputedStyle(n).cursor==='pointer')return n;}catch(y){}
+     n=n.parentElement;
+   }
+   return e;
+ }
+ function realClick(e){
+   if(!e)return false; e=clickable(e);
+   try{e.scrollIntoView({block:'center'});}catch(x){}
+   var ev=['pointerover','pointerenter','pointerdown','mousedown','focus','pointerup','mouseup','click'];
+   for(var i=0;i<ev.length;i++){
+     try{
+       if(ev[i]==='focus'){if(e.focus)e.focus();continue;}
+       var E=(ev[i].indexOf('pointer')===0)?(window.PointerEvent?new PointerEvent(ev[i],{bubbles:true,cancelable:true,view:window}):new MouseEvent(ev[i].replace('pointer','mouse'),{bubbles:true,cancelable:true,view:window})):new MouseEvent(ev[i],{bubbles:true,cancelable:true,view:window});
+       e.dispatchEvent(E);
+     }catch(z){}
+   }
+   try{e.click();}catch(w){}
+   return true;
+ }
+ function item(txt){
+   txt=txt.toLowerCase();
+   var c=all('a,button,li,span,div,p,[role=menuitem],[role=button]').filter(function(e){return visible(e)&&textOf(e).toLowerCase().indexOf(txt)>-1;});
+   c.sort(function(a,b){return textOf(a).length-textOf(b).length;});
+   return c[0];
+ }
+ function menuOpen(){return !!(item('Services')||item('Grievances')||item('Pending Actions')||item('Authorised Partners'));}
+ function toggleCands(){
+   var out=[];
+   all('mat-icon,i,span,button,a').forEach(function(e){var t=textOf(e).toLowerCase();if(t==='menu')out.push(e);});
+   all('[aria-label]').forEach(function(e){var a=(e.getAttribute('aria-label')||'').toLowerCase();if(a.indexOf('menu')>-1||a.indexOf('navigation')>-1||a.indexOf('hamburger')>-1)out.push(e);});
+   all('.navbar-toggler,.hamburger,.menu-icon,.menu-toggle,[class*="burger"],[class*="hamburger"],[class*="menu-toggle"]').forEach(function(e){out.push(e);});
+   var top=all('button,a,[role=button],mat-icon,i').filter(function(e){if(!visible(e))return false;var r=e.getBoundingClientRect();return r.top<150&&r.left>window.innerWidth*0.45;});
+   top.sort(function(a,b){return b.getBoundingClientRect().right-a.getBoundingClientRect().right;});
+   out=out.concat(top);
+   var seen=[],res=[];
+   out.forEach(function(e){if(e&&visible(e)&&seen.indexOf(e)<0){seen.push(e);res.push(e);}});
+   return res;
+ }
  function getName(){var m=text().match(/welcome\\s*back[,\\s]+([A-Za-z][A-Za-z .'-]{0,40})/i);return m?m[1].trim():'';}
  function getEmail(){var m=text().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/);return m?m[0]:'';}
  function getMobile(){
    var lines=text().split('\\n');
    for(var i=0;i<lines.length;i++){
-     var ln=lines[i];
-     var d=ln.replace(/\\D/g,'');
+     var ln=lines[i], d=ln.replace(/\\D/g,'');
      if((ln.indexOf('+')>-1||/[6-9]\\d{9}/.test(d))&&d.length>=10&&d.length<=13){
-       var ten=d.slice(-10);
-       if(/^[6-9]\\d{9}\$/.test(ten))return ten;
+       var ten=d.slice(-10); if(/^[6-9]\\d{9}\$/.test(ten))return ten;
      }
    }
    var m=text().match(/[6-9]\\d{9}/);return m?m[0]:'';
  }
-
- function findAYselect(){
-   return all('select').find(function(s){return [].slice.call(s.options).some(function(o){return (o.text||'').indexOf('2026-27')>-1;});});
- }
+ function findAYselect(){return all('select').find(function(s){return [].slice.call(s.options).some(function(o){return (o.text||'').indexOf('2026-27')>-1;});});}
  function setNativeAY(s){
    var opt=[].slice.call(s.options).find(function(o){return (o.text||'').indexOf('2026-27')>-1;});
    if(!opt)return false;
    var setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;
-   setter.call(s,opt.value); s.dispatchEvent(new Event('input',{bubbles:true})); s.dispatchEvent(new Event('change',{bubbles:true}));
-   return true;
+   setter.call(s,opt.value); s.dispatchEvent(new Event('input',{bubbles:true})); s.dispatchEvent(new Event('change',{bubbles:true})); return true;
  }
  function clickAYoption(){
-   var o=all('li,span,div,p,[role=option]').find(function(e){var t=(e.innerText||e.textContent||'').trim();return (t==='2026-27'||/^2026-27\\b/.test(t))&&vis(e);});
-   return clickEl(o);
+   var o=all('li,span,div,p,[role=option]').filter(function(e){var t=textOf(e);return visible(e)&&(t==='2026-27'||/^2026-27\\b/.test(t));});
+   o.sort(function(a,b){return textOf(a).length-textOf(b).length;});
+   if(o[0]){realClick(o[0]);return true;} return false;
  }
  function openAY(){
-   var lab=findByText('label,span,div,p','Assessment Year');
-   var trig=null;
+   var lab=item('Assessment Year'), trig=null;
    if(lab){var c=lab.parentElement;for(var k=0;k<4&&c;k++){trig=c.querySelector('select,.p-dropdown,.mat-select,mat-select,[role=combobox],.ng-select,input,button');if(trig)break;c=c.parentElement;}}
-   if(!trig){trig=document.querySelector('.p-dropdown,mat-select,[role=combobox],.ng-select');}
-   return clickEl(trig);
+   if(!trig)trig=document.querySelector('.p-dropdown,mat-select,[role=combobox],.ng-select');
+   if(trig){realClick(trig);return true;} return false;
+ }
+ function findSubmit(){
+   var c=all('button,input[type=submit],a[role=button],a').filter(function(e){if(!visible(e))return false;var t=(e.innerText||e.value||'').trim().toLowerCase();return t==='submit'||(t.indexOf('submit')>-1&&t.indexOf('dashboard')<0);});
+   c.sort(function(a,b){return (b.tagName.toLowerCase()==='button'?1:0)-(a.tagName.toLowerCase()==='button'?1:0);});
+   return c[0];
  }
 
+ var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svClicked=false,ayTried=0;
+ function ready(w){return tick-acted>w;}
+ function act(){acted=tick;}
  var tmr=setInterval(function(){
-   tick++;
-   if(done)return;
-   if(tick>500){post({t:'err',msg:'timeout at '+step});clearInterval(tmr);done=true;return;}
+   tick++; if(done)return;
+   if(tick>650){post({t:'err',msg:'timeout at '+step});clearInterval(tmr);done=true;return;}
    var T=text(), low=T.toLowerCase();
    try{
    if(step==='dash'){
      if(T.length<40)return;
-     if(!dashSent && (low.indexOf('welcome')>-1 || /[A-Z]{5}\\d{4}[A-Z]/.test(T))){
+     if(!dashSent&&(low.indexOf('welcome')>-1||/[A-Z]{5}\\d{4}[A-Z]/.test(T))){
        post({t:'dash',name:getName(),mobile:getMobile(),email:getEmail()});
-       dashSent=true; step='nav'; act(); post({t:'log',msg:'dashboard captured'});
+       dashSent=true;step='nav';cands=null;ci=0;act();post({t:'log',msg:'dashboard captured, opening menu'});
      }
      return;
    }
    if(step==='nav'){
-     var rl=findByText('a,span,div,button,li','Know Your Refund Status');
-     if(rl&&vis(rl)){clickEl(rl);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
-     if(ready(8)){
-       var tog=document.querySelector('[aria-label*="menu" i],button.navbar-toggler,.navbar-toggler,.hamburger,.menu-icon');
-       if(!tog){
-         tog=all('button,a').find(function(e){var r=e.getBoundingClientRect();return r.top<120&&r.right>window.innerWidth-90&&r.width<70;});
-       }
-       clickEl(tog); step='services'; act();
+     var rl=item('Know Your Refund Status');
+     if(rl){realClick(rl);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
+     if(menuOpen()){step='services';svClicked=false;act();post({t:'log',msg:'menu open'});return;}
+     if(cands===null){cands=toggleCands();ci=0;post({t:'log',msg:'menu candidates: '+cands.length});}
+     if(ready(5)){
+       if(ci<cands.length){realClick(cands[ci]);ci++;act();post({t:'log',msg:'tap menu button '+ci});}
+       else{cands=toggleCands();ci=0;if(cands.length===0){post({t:'err',msg:'menu toggle not found'});clearInterval(tmr);done=true;}}
      }
      return;
    }
    if(step==='services'){
-     var rl2=findByText('a,span,div,button,li','Know Your Refund Status');
-     if(rl2&&vis(rl2)){clickEl(rl2);step='ay';act();return;}
-     if(ready(6)){var sv=findByText('a,span,div,button,li','Services');clickEl(sv);step='refund';act();}
-     return;
-   }
-   if(step==='refund'){
-     if(ready(4)){
-       var rl3=findByText('a,span,div,button,li','Know Your Refund Status');
-       if(rl3){clickEl(rl3);step='ay';act();}
-       else{post({t:'err',msg:'refund menu not found'});clearInterval(tmr);done=true;}
+     var rl2=item('Know Your Refund Status');
+     if(rl2){realClick(rl2);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
+     if(!svClicked){
+       var sv=item('Services');
+       if(sv){realClick(sv);svClicked=true;act();post({t:'log',msg:'tap Services'});}
+       else if(ready(12)){step='nav';cands=null;ci=0;act();}
+       return;
      }
+     if(ready(28)){post({t:'err',msg:'refund link not found after Services'});clearInterval(tmr);done=true;}
      return;
    }
    if(step==='ay'){
-     if(low.indexOf('assessment year')<0 && low.indexOf('know refund status')<0)return;
+     if(low.indexOf('assessment year')<0&&low.indexOf('know refund status')<0)return;
      var ns=findAYselect();
      if(ns){if(setNativeAY(ns)){step='submit';act();post({t:'log',msg:'AY selected'});}return;}
      if(ready(3)){
        if(clickAYoption()){step='submit';act();post({t:'log',msg:'AY selected'});}
-       else{openAY();}
+       else{openAY();ayTried++;if(ayTried>25){post({t:'err',msg:'AY dropdown failed'});clearInterval(tmr);done=true;}}
      }
      return;
    }
    if(step==='submit'){
      if(ready(3)){
-       var sb=all('button,input[type=submit],a').find(function(e){var t=(e.innerText||e.value||'').trim().toLowerCase();return t==='submit'||(t.indexOf('submit')>-1&&t.indexOf('dashboard')<0);});
-       if(sb){clickEl(sb);step='result';act();post({t:'log',msg:'submitted'});}
+       var sb=findSubmit();
+       if(sb){realClick(sb);step='result';act();post({t:'log',msg:'submitted'});}
        else if(ready(20)){post({t:'err',msg:'submit button not found'});clearInterval(tmr);done=true;}
      }
      return;
    }
    if(step==='result'){
-     if(low.indexOf('status of income tax refund')>-1 || low.indexOf('date of status')>-1){
-       var st='', dt='';
-       var tbls=all('table');
+     if(low.indexOf('status of income tax refund')>-1||low.indexOf('date of status')>-1){
+       var st='',dt='',tbls=all('table');
        for(var i=0;i<tbls.length;i++){
          var h=(tbls[i].innerText||'').toLowerCase();
-         if(h.indexOf('status')>-1 && h.indexOf('date of status')>-1){
+         if(h.indexOf('status')>-1&&h.indexOf('date of status')>-1){
            var rows=tbls[i].querySelectorAll('tr');
-           if(rows.length>=2){
-             var cells=rows[1].querySelectorAll('td,th');
-             if(cells.length>=1)st=(cells[0].innerText||'').trim();
-             if(cells.length>=2)dt=(cells[1].innerText||'').trim();
-           }
+           if(rows.length>=2){var cells=rows[1].querySelectorAll('td,th');if(cells.length>=1)st=(cells[0].innerText||'').trim();if(cells.length>=2)dt=(cells[1].innerText||'').trim();}
            break;
          }
        }
@@ -247,7 +283,7 @@ class _HomeState extends State<Home> {
   }
 
   void _injectDriver() {
-    Future.delayed(const Duration(milliseconds: 900), () {
+    Future.delayed(const Duration(milliseconds: 1200), () {
       if (loggedIn && current >= 0 && autoMode) {
         setState(() => auto = 'Reading dashboard...');
         ctrl.runJavaScript(autoJs());
@@ -356,7 +392,7 @@ class _HomeState extends State<Home> {
     return s;
   }
 
-  // Manual fallback capture (status only; name/mobile/email come from auto run).
+  // Manual fallback capture (status only).
   Future<void> capture() async {
     final text = await pageText();
     final hits = text
@@ -388,13 +424,11 @@ class _HomeState extends State<Home> {
     if (ok != true) return;
     final a = accts[current];
     a.status = tc.text;
-    if (a.date.isEmpty) a.date = '';
     await writeResults();
     await advance();
   }
 
-  // Build the result workbook fresh each time from in-memory data, so saving
-  // after every PAN never loses earlier rows. One row per PAN, fixed columns.
+  // Rebuild the result workbook from memory each save: never loses earlier rows.
   Future<void> writeResults() async {
     if (outPath == null) {
       final dir = await getApplicationDocumentsDirectory();
@@ -488,7 +522,7 @@ class _HomeState extends State<Home> {
                     subtitle: Text([
                       a.name,
                       a.status.isEmpty ? 'Pending' : a.status
-                    ].where((e) => e.isNotEmpty).join(' — ')),
+                    ].where((e) => e.isNotEmpty).join(' - ')),
                     trailing: Text(a.date, style: const TextStyle(fontSize: 11)),
                   ))
               .toList(),
