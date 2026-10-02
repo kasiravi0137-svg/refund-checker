@@ -16,7 +16,8 @@ class Acct {
   final int row;
   final String pan, pwd;
   String status, date;
-  Acct(this.row, this.pan, this.pwd, this.status, this.date);
+  String name = '', mobile = '', email = '';
+  Acct(this.row, this.pan, this.pwd, [this.status = '', this.date = '']);
 }
 
 String _s(Data? d) {
@@ -26,6 +27,7 @@ String _s(Data? d) {
   return v.toString();
 }
 
+// ---- Login auto-fill (unchanged logic) ----
 String fillJs(String pan, String pwd) => '''
 (function(){
  var P=${jsonEncode(pan)}, W=${jsonEncode(pwd)};
@@ -51,6 +53,152 @@ String fillJs(String pan, String pwd) => '''
 })();
 ''';
 
+// ---- Post-login automation driver ----
+// Runs entirely inside the SPA. Reports back through the 'Refund' JS channel:
+//   {t:'dash', name, mobile, email}
+//   {t:'status', status, date}
+//   {t:'err', msg}
+//   {t:'log', msg}
+// NOTE: the menu/dropdown selectors are best-effort. If a step stalls it posts
+// an 'err' and the manual Capture button stays available as a fallback.
+String autoJs() => '''
+(function(){
+ function post(o){try{Refund.postMessage(JSON.stringify(o))}catch(e){}}
+ function all(sel){return [].slice.call(document.querySelectorAll(sel));}
+ function vis(el){if(!el)return false;var r=el.getBoundingClientRect();return r.width>0&&r.height>0;}
+ function findByText(sel,txt){txt=txt.toLowerCase();return all(sel).find(function(e){return (e.innerText||e.textContent||'').toLowerCase().indexOf(txt)>-1;});}
+ function clickEl(e){if(!e)return false;try{e.scrollIntoView({block:'center'});}catch(x){} try{e.click();}catch(y){return false;} return true;}
+ function text(){return document.body.innerText||'';}
+
+ var step='dash', tick=0, acted=-50, done=false, dashSent=false;
+ function ready(w){return tick-acted>w;}
+ function act(){acted=tick;}
+
+ function getName(){var m=text().match(/welcome\\s*back[,\\s]+([A-Za-z][A-Za-z .'-]{0,40})/i);return m?m[1].trim():'';}
+ function getEmail(){var m=text().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/);return m?m[0]:'';}
+ function getMobile(){
+   var lines=text().split('\\n');
+   for(var i=0;i<lines.length;i++){
+     var ln=lines[i];
+     var d=ln.replace(/\\D/g,'');
+     if((ln.indexOf('+')>-1||/[6-9]\\d{9}/.test(d))&&d.length>=10&&d.length<=13){
+       var ten=d.slice(-10);
+       if(/^[6-9]\\d{9}\$/.test(ten))return ten;
+     }
+   }
+   var m=text().match(/[6-9]\\d{9}/);return m?m[0]:'';
+ }
+
+ function findAYselect(){
+   return all('select').find(function(s){return [].slice.call(s.options).some(function(o){return (o.text||'').indexOf('2026-27')>-1;});});
+ }
+ function setNativeAY(s){
+   var opt=[].slice.call(s.options).find(function(o){return (o.text||'').indexOf('2026-27')>-1;});
+   if(!opt)return false;
+   var setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;
+   setter.call(s,opt.value); s.dispatchEvent(new Event('input',{bubbles:true})); s.dispatchEvent(new Event('change',{bubbles:true}));
+   return true;
+ }
+ function clickAYoption(){
+   var o=all('li,span,div,p,[role=option]').find(function(e){var t=(e.innerText||e.textContent||'').trim();return (t==='2026-27'||/^2026-27\\b/.test(t))&&vis(e);});
+   return clickEl(o);
+ }
+ function openAY(){
+   var lab=findByText('label,span,div,p','Assessment Year');
+   var trig=null;
+   if(lab){var c=lab.parentElement;for(var k=0;k<4&&c;k++){trig=c.querySelector('select,.p-dropdown,.mat-select,mat-select,[role=combobox],.ng-select,input,button');if(trig)break;c=c.parentElement;}}
+   if(!trig){trig=document.querySelector('.p-dropdown,mat-select,[role=combobox],.ng-select');}
+   return clickEl(trig);
+ }
+
+ var tmr=setInterval(function(){
+   tick++;
+   if(done)return;
+   if(tick>500){post({t:'err',msg:'timeout at '+step});clearInterval(tmr);done=true;return;}
+   var T=text(), low=T.toLowerCase();
+   try{
+   if(step==='dash'){
+     if(T.length<40)return;
+     if(!dashSent && (low.indexOf('welcome')>-1 || /[A-Z]{5}\\d{4}[A-Z]/.test(T))){
+       post({t:'dash',name:getName(),mobile:getMobile(),email:getEmail()});
+       dashSent=true; step='nav'; act(); post({t:'log',msg:'dashboard captured'});
+     }
+     return;
+   }
+   if(step==='nav'){
+     var rl=findByText('a,span,div,button,li','Know Your Refund Status');
+     if(rl&&vis(rl)){clickEl(rl);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
+     if(ready(8)){
+       var tog=document.querySelector('[aria-label*="menu" i],button.navbar-toggler,.navbar-toggler,.hamburger,.menu-icon');
+       if(!tog){
+         tog=all('button,a').find(function(e){var r=e.getBoundingClientRect();return r.top<120&&r.right>window.innerWidth-90&&r.width<70;});
+       }
+       clickEl(tog); step='services'; act();
+     }
+     return;
+   }
+   if(step==='services'){
+     var rl2=findByText('a,span,div,button,li','Know Your Refund Status');
+     if(rl2&&vis(rl2)){clickEl(rl2);step='ay';act();return;}
+     if(ready(6)){var sv=findByText('a,span,div,button,li','Services');clickEl(sv);step='refund';act();}
+     return;
+   }
+   if(step==='refund'){
+     if(ready(4)){
+       var rl3=findByText('a,span,div,button,li','Know Your Refund Status');
+       if(rl3){clickEl(rl3);step='ay';act();}
+       else{post({t:'err',msg:'refund menu not found'});clearInterval(tmr);done=true;}
+     }
+     return;
+   }
+   if(step==='ay'){
+     if(low.indexOf('assessment year')<0 && low.indexOf('know refund status')<0)return;
+     var ns=findAYselect();
+     if(ns){if(setNativeAY(ns)){step='submit';act();post({t:'log',msg:'AY selected'});}return;}
+     if(ready(3)){
+       if(clickAYoption()){step='submit';act();post({t:'log',msg:'AY selected'});}
+       else{openAY();}
+     }
+     return;
+   }
+   if(step==='submit'){
+     if(ready(3)){
+       var sb=all('button,input[type=submit],a').find(function(e){var t=(e.innerText||e.value||'').trim().toLowerCase();return t==='submit'||(t.indexOf('submit')>-1&&t.indexOf('dashboard')<0);});
+       if(sb){clickEl(sb);step='result';act();post({t:'log',msg:'submitted'});}
+       else if(ready(20)){post({t:'err',msg:'submit button not found'});clearInterval(tmr);done=true;}
+     }
+     return;
+   }
+   if(step==='result'){
+     if(low.indexOf('status of income tax refund')>-1 || low.indexOf('date of status')>-1){
+       var st='', dt='';
+       var tbls=all('table');
+       for(var i=0;i<tbls.length;i++){
+         var h=(tbls[i].innerText||'').toLowerCase();
+         if(h.indexOf('status')>-1 && h.indexOf('date of status')>-1){
+           var rows=tbls[i].querySelectorAll('tr');
+           if(rows.length>=2){
+             var cells=rows[1].querySelectorAll('td,th');
+             if(cells.length>=1)st=(cells[0].innerText||'').trim();
+             if(cells.length>=2)dt=(cells[1].innerText||'').trim();
+           }
+           break;
+         }
+       }
+       if(!st){var idx=low.indexOf('your refund');if(idx>-1)st=T.substring(idx,idx+400);}
+       st=st.replace(/\\s+/g,' ').trim(); dt=dt.replace(/\\s+/g,' ').trim();
+       if(st){post({t:'status',status:st,date:dt});clearInterval(tmr);done=true;}
+       else if(ready(25)){post({t:'err',msg:'result text empty'});clearInterval(tmr);done=true;}
+     } else if(low.indexOf('no record')>-1){
+       post({t:'status',status:T.replace(/\\s+/g,' ').slice(0,300),date:''});clearInterval(tmr);done=true;
+     }
+     return;
+   }
+   }catch(e){post({t:'err',msg:'js:'+(e&&e.message?e.message:e)});clearInterval(tmr);done=true;}
+ },200);
+})();
+''';
+
 class Home extends StatefulWidget {
   const Home({super.key});
   @override
@@ -62,7 +210,9 @@ class _HomeState extends State<Home> {
   String? outPath;
   List<Acct> accts = [];
   int current = -1;
-  bool loggedIn = false, injected = false;
+  bool loggedIn = false, injected = false, autoStarted = false;
+  bool autoMode = true;
+  String auto = '';
   late final WebViewController ctrl;
 
   @override
@@ -70,20 +220,78 @@ class _HomeState extends State<Home> {
     super.initState();
     ctrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel('Refund',
+          onMessageReceived: (m) => onDriver(m.message))
       ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) {
+        onPageFinished: (url) {
           if (current >= 0 && !injected && !loggedIn) {
             injected = true;
             final a = accts[current];
             ctrl.runJavaScript(fillJs(a.pan, a.pwd));
           }
+          if (current >= 0 && loggedIn && autoMode && !autoStarted) {
+            autoStarted = true;
+            _injectDriver();
+          }
         },
         onUrlChange: (c) {
           if (current >= 0 && (c.url ?? '').contains('dashboard') && !loggedIn) {
             setState(() => loggedIn = true);
+            if (autoMode && !autoStarted) {
+              autoStarted = true;
+              _injectDriver();
+            }
           }
         },
       ));
+  }
+
+  void _injectDriver() {
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (loggedIn && current >= 0 && autoMode) {
+        setState(() => auto = 'Reading dashboard...');
+        ctrl.runJavaScript(autoJs());
+      }
+    });
+  }
+
+  Future<void> onDriver(String raw) async {
+    if (current < 0 || current >= accts.length) return;
+    Map<String, dynamic> o;
+    try {
+      o = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return;
+    }
+    final a = accts[current];
+    switch (o['t']) {
+      case 'log':
+        if (mounted) setState(() => auto = (o['msg'] ?? '').toString());
+        break;
+      case 'dash':
+        a.name = (o['name'] ?? '').toString();
+        a.mobile = (o['mobile'] ?? '').toString();
+        a.email = (o['email'] ?? '').toString();
+        if (mounted) setState(() => auto = 'Dashboard: ${a.name}');
+        await writeResults();
+        break;
+      case 'status':
+        a.status = (o['status'] ?? '').toString();
+        a.date = (o['date'] ?? '').toString();
+        await writeResults();
+        if (mounted) setState(() => auto = 'Saved. Next PAN...');
+        await advance();
+        break;
+      case 'err':
+        if (a.status.isEmpty) a.status = 'ISSUE: ${o['msg']}';
+        await writeResults();
+        if (mounted) {
+          setState(() => auto =
+              'Auto step failed (${o['msg']}). Finish manually then tap Capture, or Skip.');
+          msg('Auto failed: ${o['msg']}');
+        }
+        break;
+    }
   }
 
   void msg(String t) =>
@@ -100,7 +308,7 @@ class _HomeState extends State<Home> {
       final row = sheet.row(i);
       String g(int c) => c < row.length ? _s(row[c]).trim() : '';
       if (g(0).isEmpty || g(1).isEmpty) continue;
-      list.add(Acct(i, g(0).toUpperCase(), g(1), g(2), g(3)));
+      list.add(Acct(i, g(0).toUpperCase(), g(1)));
     }
     final dir = await getApplicationDocumentsDirectory();
     setState(() {
@@ -116,6 +324,8 @@ class _HomeState extends State<Home> {
       current = i;
       loggedIn = false;
       injected = false;
+      autoStarted = false;
+      auto = '';
     });
     await WebViewCookieManager().clearCookies();
     await ctrl.clearLocalStorage();
@@ -133,7 +343,7 @@ class _HomeState extends State<Home> {
     final n = nextPending(current + 1);
     if (n < 0) {
       setState(() => current = -1);
-      msg('All done. Tap share icon to get the Excel.');
+      msg('All done. Tap the share icon to get the Excel.');
     } else {
       await start(n);
     }
@@ -146,6 +356,7 @@ class _HomeState extends State<Home> {
     return s;
   }
 
+  // Manual fallback capture (status only; name/mobile/email come from auto run).
   Future<void> capture() async {
     final text = await pageText();
     final hits = text
@@ -175,23 +386,37 @@ class _HomeState extends State<Home> {
       ),
     );
     if (ok != true) return;
-    await save(accts[current], tc.text);
+    final a = accts[current];
+    a.status = tc.text;
+    if (a.date.isEmpty) a.date = '';
+    await writeResults();
     await advance();
   }
 
-  Future<void> save(Acct a, String status) async {
-    final d = DateTime.now();
-    a.status = status;
-    a.date =
-        '${d.day.toString().padLeft(2, '0')}-${d.month.toString().padLeft(2, '0')}-${d.year} ${d.hour}:${d.minute.toString().padLeft(2, '0')}';
-    final sheet = excel!.tables[excel!.tables.keys.first]!;
-    sheet.updateCell(
-        CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: a.row),
-        TextCellValue(a.status));
-    sheet.updateCell(
-        CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: a.row),
-        TextCellValue(a.date));
-    final bytes = excel!.save();
+  // Build the result workbook fresh each time from in-memory data, so saving
+  // after every PAN never loses earlier rows. One row per PAN, fixed columns.
+  Future<void> writeResults() async {
+    if (outPath == null) {
+      final dir = await getApplicationDocumentsDirectory();
+      outPath = '${dir.path}/refund_results.xlsx';
+    }
+    final ex = Excel.createExcel();
+    final sheetName = ex.getDefaultSheet()!;
+    final s = ex[sheetName];
+    List<CellValue?> rowOf(List<String> v) =>
+        v.map((e) => TextCellValue(e) as CellValue?).toList();
+    s.appendRow(rowOf([
+      'PAN Card Number',
+      'Name',
+      'Mobile Number',
+      'Email',
+      'Status',
+      'Date of Status'
+    ]));
+    for (final a in accts) {
+      s.appendRow(rowOf([a.pan, a.name, a.mobile, a.email, a.status, a.date]));
+    }
+    final bytes = ex.save();
     if (bytes != null) await File(outPath!).writeAsBytes(bytes, flush: true);
   }
 
@@ -221,7 +446,7 @@ class _HomeState extends State<Home> {
     return Column(children: [
       Padding(
         padding: const EdgeInsets.all(12),
-        child: Wrap(spacing: 8, children: [
+        child: Wrap(spacing: 8, runSpacing: 8, children: [
           ElevatedButton.icon(
               onPressed: pick,
               icon: const Icon(Icons.upload_file),
@@ -234,21 +459,36 @@ class _HomeState extends State<Home> {
                 },
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Start')),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Auto'),
+            Switch(
+                value: autoMode,
+                onChanged: (v) => setState(() => autoMode = v)),
+          ]),
         ]),
       ),
       if (accts.isEmpty)
         const Padding(
           padding: EdgeInsets.all(16),
           child: Text(
-              'Excel columns (row 1 headers): PAN | Password | Status | Date.\n'
-              'Captcha/OTP you complete in the app. Use only for your own or authorised accounts.'),
+              'Input Excel (row 1 = headers): PAN | Password.\n'
+              'Output columns written automatically: '
+              'PAN | Name | Mobile | Email | Status | Date of Status.\n\n'
+              'With Auto ON: after each login the app reads the dashboard, '
+              'opens Services > Know Your Refund Status, picks AY 2026-27, '
+              'submits, saves the result, logs out and moves to the next PAN.\n'
+              'You still complete captcha / OTP during each login.\n\n'
+              'Use only for your own or authorised accounts.'),
         ),
       Expanded(
         child: ListView(
           children: accts
               .map((a) => ListTile(
                     title: Text(a.pan),
-                    subtitle: Text(a.status.isEmpty ? 'Pending' : a.status),
+                    subtitle: Text([
+                      a.name,
+                      a.status.isEmpty ? 'Pending' : a.status
+                    ].where((e) => e.isNotEmpty).join(' — ')),
                     trailing: Text(a.date, style: const TextStyle(fontSize: 11)),
                   ))
               .toList(),
@@ -269,8 +509,11 @@ class _HomeState extends State<Home> {
           Text('${a.pan}  (${current + 1}/${accts.length})',
               style: const TextStyle(fontWeight: FontWeight.bold)),
           Text(loggedIn
-              ? 'Logged in. Open the refund / filed returns page, then tap Capture.'
+              ? (autoMode
+                  ? (auto.isEmpty ? 'Logged in. Running automatically...' : auto)
+                  : 'Logged in. Open the refund page, then tap Capture.')
               : 'Logging in automatically. Complete captcha / OTP if asked.'),
+          const SizedBox(height: 6),
           Row(children: [
             ElevatedButton(onPressed: capture, child: const Text('Capture')),
             const SizedBox(width: 8),
