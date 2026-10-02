@@ -28,6 +28,9 @@ jobs:
           cp /tmp/keep/pubspec.yaml pubspec.yaml && cp /tmp/keep/main.dart lib/main.dart
           rm -rf test
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's/version "1.7.10"/version "1.9.24"/' android/settings.gradle
+          sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle
 
       - name: Get dependencies
         run: flutter pub get
