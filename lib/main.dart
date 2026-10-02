@@ -54,13 +54,14 @@ String fillJs(String pan, String pwd) => '''
 ''';
 
 // ---- Post-login automation driver ----
-// Runs inside the Angular SPA. Reports back through the 'Refund' JS channel:
-//   {t:'dash', name, mobile, email}  {t:'status', status, date}
-//   {t:'err', msg}                   {t:'log', msg}
+// Channel 'Refund' messages:
+//   {t:'dash',name,mobile,email}  {t:'status',status,date}
+//   {t:'err',msg}  {t:'log',msg}  {t:'diag',data}
 String autoJs() => '''
 (function(){
  function post(o){try{Refund.postMessage(JSON.stringify(o))}catch(e){}}
- function all(sel){return [].slice.call(document.querySelectorAll(sel));}
+ function log(m){post({t:'log',msg:m});}
+ function all(sel){try{return [].slice.call(document.querySelectorAll(sel));}catch(e){return [];}}
  function textOf(e){return ((e&&(e.innerText||e.textContent))||'').trim();}
  function text(){return document.body.innerText||'';}
  function visible(e){
@@ -71,7 +72,7 @@ String autoJs() => '''
  }
  function clickable(e){
    var n=e;
-   for(var i=0;i<6&&n;i++){
+   for(var i=0;i<7&&n;i++){
      var tag=n.tagName?n.tagName.toLowerCase():'';
      if(tag==='a'||tag==='button')return n;
      if(n.getAttribute){
@@ -87,14 +88,14 @@ String autoJs() => '''
  function realClick(e){
    if(!e)return false; e=clickable(e);
    try{e.scrollIntoView({block:'center'});}catch(x){}
-   var ev=['pointerover','pointerenter','pointerdown','mousedown','focus','pointerup','mouseup'];
+   var ev=['pointerover','pointerenter','pointerdown','mousedown','pointerup','mouseup'];
    for(var i=0;i<ev.length;i++){
      try{
-       if(ev[i]==='focus'){if(e.focus)e.focus();continue;}
-       var E=(ev[i].indexOf('pointer')===0)?(window.PointerEvent?new PointerEvent(ev[i],{bubbles:true,cancelable:true,view:window}):new MouseEvent(ev[i].replace('pointer','mouse'),{bubbles:true,cancelable:true,view:window})):new MouseEvent(ev[i],{bubbles:true,cancelable:true,view:window});
+       var E=(window.PointerEvent&&ev[i].indexOf('pointer')===0)?new PointerEvent(ev[i],{bubbles:true,cancelable:true,view:window}):new MouseEvent(ev[i].replace('pointer','mouse'),{bubbles:true,cancelable:true,view:window});
        e.dispatchEvent(E);
      }catch(z){}
    }
+   try{if(e.focus)e.focus();}catch(f){}
    try{e.click();}catch(w){}
    return true;
  }
@@ -104,10 +105,13 @@ String autoJs() => '''
    c.sort(function(a,b){return textOf(a).length-textOf(b).length;});
    return c[0];
  }
- function menuOpen(){return !!(item('Services')||item('Grievances')||item('Pending Actions')||item('Authorised Partners'));}
+ function menuOpen(){
+   var hits=0;['Services','Grievances','Pending Actions','Authorised Partners','AIS'].forEach(function(L){if(item(L))hits++;});
+   return hits>=2;
+ }
  function toggleCands(){
    var out=[];
-   all('mat-icon,i,span,button,a').forEach(function(e){var t=textOf(e).toLowerCase();if(t==='menu')out.push(e);});
+   all('mat-icon,i,span,button,a').forEach(function(e){if(textOf(e).toLowerCase()==='menu')out.push(e);});
    all('[aria-label]').forEach(function(e){var a=(e.getAttribute('aria-label')||'').toLowerCase();if(a.indexOf('menu')>-1||a.indexOf('navigation')>-1||a.indexOf('hamburger')>-1)out.push(e);});
    all('.navbar-toggler,.hamburger,.menu-icon,.menu-toggle,[class*="burger"],[class*="hamburger"],[class*="menu-toggle"]').forEach(function(e){out.push(e);});
    var top=all('button,a,[role=button],mat-icon,i').filter(function(e){if(!visible(e))return false;var r=e.getBoundingClientRect();return r.top<150&&r.left>window.innerWidth*0.45;});
@@ -117,15 +121,51 @@ String autoJs() => '''
    out.forEach(function(e){if(e&&visible(e)&&seen.indexOf(e)<0){seen.push(e);res.push(e);}});
    return res;
  }
+ function attr(e,n){try{return e.getAttribute?e.getAttribute(n):'';}catch(x){return '';}}
+ function desc(e){
+   if(!e)return 'null';
+   var t=e.tagName?e.tagName.toLowerCase():'?';
+   var id=e.id?('#'+e.id):'';
+   var cls=''; try{if(e.className&&e.className.toString)cls='.'+e.className.toString().trim().replace(/\\s+/g,'.').slice(0,50);}catch(x){}
+   var r=attr(e,'role')?('[role='+attr(e,'role')+']'):'';
+   var h=attr(e,'href')||attr(e,'routerlink')||attr(e,'ng-reflect-router-link'); h=h?(' @'+h):'';
+   var vis=visible(e)?'':' (hidden)';
+   return t+id+cls+r+h+' "'+textOf(e).slice(0,34)+'"'+vis;
+ }
+ function ancestry(e){var o=[],n=e;for(var i=0;i<6&&n;i++){o.push(desc(n));n=n.parentElement;}return o.join('\\n   > ');}
+ function dumpMenu(reason){
+   try{
+     var L=['=== DIAG: '+reason+' @ '+location.href+' ==='];
+     var sv=item('Services');
+     L.push('Services item: '+desc(sv));
+     if(sv){L.push('Services ancestry:\\n   '+ancestry(sv));
+            L.push('Services clickable target: '+desc(clickable(sv)));
+            L.push('Services outerHTML: '+((sv.outerHTML||'').slice(0,320)));}
+     ['Dashboard','e-File','Authorised Partners','Services','AIS','Pending Actions','Grievances','Help','Know Your Refund Status','Refund Reissue','Tax Credit Mismatch'].forEach(function(x){L.push('["'+x+'"] -> '+desc(item(x)));});
+     var anchors=all('a[href]').filter(function(a){var t=textOf(a).toLowerCase();return t.indexOf('refund')>-1||t.indexOf('services')>-1;});
+     L.push('refund/services anchors: '+anchors.length);
+     anchors.slice(0,8).forEach(function(a){L.push('  a '+desc(a));});
+     var ov=all('.cdk-overlay-container,[class*="overlay"],[class*="dialog"],[class*="sidenav"],[class*="drawer"],[role=dialog],mat-dialog-container');
+     L.push('overlay containers: '+ov.length);
+     ov.slice(0,4).forEach(function(o){L.push('  ov '+desc(o)+' kids='+o.children.length);});
+     post({t:'diag',data:L.join('\\n')});
+   }catch(e){post({t:'diag',data:'diag err '+e.message});}
+ }
+ function refundHref(){
+   var as=all('a[href]');
+   var best=as.find(function(x){return textOf(x).toLowerCase().indexOf('know your refund')>-1;});
+   if(!best)best=as.find(function(x){var h=(attr(x,'href')||'').toLowerCase();return h.indexOf('refund')>-1&&h.indexOf('reissue')<0;});
+   return best?attr(best,'href'):null;
+ }
+ function navTo(h){try{location.href=(new URL(h,location.href)).href;return true;}catch(e){try{location.hash=h;return true;}catch(x){return false;}}}
+
  function getName(){var m=text().match(/welcome\\s*back[,\\s]+([A-Za-z][A-Za-z .'-]{0,40})/i);return m?m[1].trim():'';}
  function getEmail(){var m=text().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/);return m?m[0]:'';}
  function getMobile(){
    var lines=text().split('\\n');
    for(var i=0;i<lines.length;i++){
      var ln=lines[i], d=ln.replace(/\\D/g,'');
-     if((ln.indexOf('+')>-1||/[6-9]\\d{9}/.test(d))&&d.length>=10&&d.length<=13){
-       var ten=d.slice(-10); if(/^[6-9]\\d{9}\$/.test(ten))return ten;
-     }
+     if((ln.indexOf('+')>-1||/[6-9]\\d{9}/.test(d))&&d.length>=10&&d.length<=13){var ten=d.slice(-10);if(/^[6-9]\\d{9}\$/.test(ten))return ten;}
    }
    var m=text().match(/[6-9]\\d{9}/);return m?m[0]:'';
  }
@@ -156,57 +196,63 @@ String autoJs() => '''
  var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svClicked=false,ayTried=0;
  function ready(w){return tick-acted>w;}
  function act(){acted=tick;}
+ function fail(msg){dumpMenu(msg);post({t:'err',msg:msg});clearInterval(tmr);done=true;}
+
  var tmr=setInterval(function(){
    tick++; if(done)return;
-   if(tick>650){post({t:'err',msg:'timeout at '+step});clearInterval(tmr);done=true;return;}
+   if(tick>650){fail('timeout at '+step);return;}
    var T=text(), low=T.toLowerCase();
    try{
    if(step==='dash'){
      if(T.length<40)return;
      if(!dashSent&&(low.indexOf('welcome')>-1||/[A-Z]{5}\\d{4}[A-Z]/.test(T))){
        post({t:'dash',name:getName(),mobile:getMobile(),email:getEmail()});
-       dashSent=true;step='nav';cands=null;ci=0;act();post({t:'log',msg:'dashboard captured, opening menu'});
+       dashSent=true;step='nav';cands=null;ci=0;act();log('dashboard captured, opening menu');
      }
      return;
    }
    if(step==='nav'){
      var rl=item('Know Your Refund Status');
-     if(rl){realClick(rl);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
-     if(menuOpen()){step='services';svClicked=false;act();post({t:'log',msg:'menu open'});return;}
-     if(cands===null){cands=toggleCands();ci=0;post({t:'log',msg:'menu candidates: '+cands.length});}
-     if(ready(5)){
-       if(ci<cands.length){realClick(cands[ci]);ci++;act();post({t:'log',msg:'tap menu button '+ci});}
-       else{cands=toggleCands();ci=0;if(cands.length===0){post({t:'err',msg:'menu toggle not found'});clearInterval(tmr);done=true;}}
+     if(rl){log('refund link visible: '+desc(rl));realClick(rl);step='ay';act();return;}
+     var rh=refundHref();
+     if(rh){log('direct refund href: '+rh);navTo(rh);step='ay';act();return;}
+     if(menuOpen()){log('menu open');step='services';svClicked=false;act();return;}
+     if(cands===null){cands=toggleCands();ci=0;log('menu candidates: '+cands.length);}
+     if(ready(10)){
+       if(ci<cands.length){log('tap menu button '+(ci+1)+': '+desc(cands[ci]));realClick(cands[ci]);ci++;act();}
+       else{cands=toggleCands();ci=0;if(cands.length===0)fail('menu toggle not found');}
      }
      return;
    }
    if(step==='services'){
      var rl2=item('Know Your Refund Status');
-     if(rl2){realClick(rl2);step='ay';act();post({t:'log',msg:'opening refund status'});return;}
+     if(rl2){log('refund link: '+desc(rl2));realClick(rl2);step='ay';act();return;}
+     var rh2=refundHref();
+     if(rh2&&svClicked){log('refund href after services: '+rh2);navTo(rh2);step='ay';act();return;}
      if(!svClicked){
        var sv=item('Services');
-       if(sv){realClick(sv);svClicked=true;act();post({t:'log',msg:'tap Services'});}
-       else if(ready(12)){step='nav';cands=null;ci=0;act();}
+       if(sv){log('services el: '+desc(sv)+' | click target: '+desc(clickable(sv)));realClick(sv);svClicked=true;act();}
+       else if(ready(12)){dumpMenu('Services element not found');step='nav';cands=null;ci=0;act();}
        return;
      }
-     if(ready(28)){post({t:'err',msg:'refund link not found after Services'});clearInterval(tmr);done=true;}
+     if(ready(30))fail('refund link not found after Services');
      return;
    }
    if(step==='ay'){
      if(low.indexOf('assessment year')<0&&low.indexOf('know refund status')<0)return;
      var ns=findAYselect();
-     if(ns){if(setNativeAY(ns)){step='submit';act();post({t:'log',msg:'AY selected'});}return;}
+     if(ns){if(setNativeAY(ns)){step='submit';act();log('AY selected (native)');}return;}
      if(ready(3)){
-       if(clickAYoption()){step='submit';act();post({t:'log',msg:'AY selected'});}
-       else{openAY();ayTried++;if(ayTried>25){post({t:'err',msg:'AY dropdown failed'});clearInterval(tmr);done=true;}}
+       if(clickAYoption()){step='submit';act();log('AY selected');}
+       else{openAY();ayTried++;if(ayTried>25)fail('AY dropdown failed');}
      }
      return;
    }
    if(step==='submit'){
      if(ready(3)){
        var sb=findSubmit();
-       if(sb){realClick(sb);step='result';act();post({t:'log',msg:'submitted'});}
-       else if(ready(20)){post({t:'err',msg:'submit button not found'});clearInterval(tmr);done=true;}
+       if(sb){log('submit: '+desc(sb));realClick(sb);step='result';act();}
+       else if(ready(20))fail('submit button not found');
      }
      return;
    }
@@ -224,13 +270,13 @@ String autoJs() => '''
        if(!st){var idx=low.indexOf('your refund');if(idx>-1)st=T.substring(idx,idx+400);}
        st=st.replace(/\\s+/g,' ').trim(); dt=dt.replace(/\\s+/g,' ').trim();
        if(st){post({t:'status',status:st,date:dt});clearInterval(tmr);done=true;}
-       else if(ready(25)){post({t:'err',msg:'result text empty'});clearInterval(tmr);done=true;}
+       else if(ready(25))fail('result text empty');
      } else if(low.indexOf('no record')>-1){
        post({t:'status',status:T.replace(/\\s+/g,' ').slice(0,300),date:''});clearInterval(tmr);done=true;
      }
      return;
    }
-   }catch(e){post({t:'err',msg:'js:'+(e&&e.message?e.message:e)});clearInterval(tmr);done=true;}
+   }catch(e){fail('js:'+(e&&e.message?e.message:e));}
  },200);
 })();
 ''';
@@ -244,6 +290,7 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   Excel? excel;
   String? outPath;
+  String? logPath;
   List<Acct> accts = [];
   int current = -1;
   bool loggedIn = false, injected = false, autoStarted = false;
@@ -291,6 +338,16 @@ class _HomeState extends State<Home> {
     });
   }
 
+  Future<void> logLine(String s) async {
+    logPath ??=
+        '${(await getApplicationDocumentsDirectory()).path}/refund_log.txt';
+    final t = DateTime.now().toIso8601String();
+    try {
+      await File(logPath!)
+          .writeAsString('[$t] $s\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
   Future<void> onDriver(String raw) async {
     if (current < 0 || current >= accts.length) return;
     Map<String, dynamic> o;
@@ -302,29 +359,40 @@ class _HomeState extends State<Home> {
     final a = accts[current];
     switch (o['t']) {
       case 'log':
-        if (mounted) setState(() => auto = (o['msg'] ?? '').toString());
+        final m = (o['msg'] ?? '').toString();
+        await logLine('LOG [${a.pan}] $m');
+        if (mounted) setState(() => auto = m);
+        break;
+      case 'diag':
+        await logLine('DIAG [${a.pan}]\n${(o['data'] ?? '').toString()}');
+        if (mounted) msg('Diagnostics saved. Tap the log icon to share.');
         break;
       case 'dash':
         a.name = (o['name'] ?? '').toString();
         a.mobile = (o['mobile'] ?? '').toString();
         a.email = (o['email'] ?? '').toString();
+        await logLine(
+            'DASH [${a.pan}] name=${a.name} mobile=${a.mobile} email=${a.email}');
         if (mounted) setState(() => auto = 'Dashboard: ${a.name}');
         await writeResults();
         break;
       case 'status':
         a.status = (o['status'] ?? '').toString();
         a.date = (o['date'] ?? '').toString();
+        await logLine('STATUS [${a.pan}] ${a.status} | ${a.date}');
         await writeResults();
         if (mounted) setState(() => auto = 'Saved. Next PAN...');
         await advance();
         break;
       case 'err':
-        if (a.status.isEmpty) a.status = 'ISSUE: ${o['msg']}';
+        final m = (o['msg'] ?? '').toString();
+        await logLine('ERR [${a.pan}] $m');
+        if (a.status.isEmpty) a.status = 'ISSUE: $m';
         await writeResults();
         if (mounted) {
           setState(() => auto =
-              'Auto step failed (${o['msg']}). Finish manually then tap Capture, or Skip.');
-          msg('Auto failed: ${o['msg']}');
+              'Auto step failed ($m). Finish manually then Capture, or Skip.');
+          msg('Auto failed: $m');
         }
         break;
     }
@@ -351,6 +419,7 @@ class _HomeState extends State<Home> {
       excel = ex;
       accts = list;
       outPath = '${dir.path}/refund_results.xlsx';
+      logPath = '${dir.path}/refund_log.txt';
     });
     msg('${list.length} accounts loaded');
   }
@@ -363,6 +432,7 @@ class _HomeState extends State<Home> {
       autoStarted = false;
       auto = '';
     });
+    await logLine('---- START ${accts[i].pan} ----');
     await WebViewCookieManager().clearCookies();
     await ctrl.clearLocalStorage();
     await ctrl.loadRequest(Uri.parse(loginUrl));
@@ -462,12 +532,24 @@ class _HomeState extends State<Home> {
     await Share.shareXFiles([XFile(outPath!)]);
   }
 
+  Future<void> shareLog() async {
+    if (logPath == null || !File(logPath!).existsSync()) {
+      msg('No log yet');
+      return;
+    }
+    await Share.shareXFiles([XFile(logPath!)]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Refund Status Checker'),
         actions: [
+          IconButton(
+              icon: const Icon(Icons.bug_report),
+              tooltip: 'Share log',
+              onPressed: shareLog),
           if (accts.isNotEmpty)
             IconButton(icon: const Icon(Icons.share), onPressed: share)
         ],
@@ -506,12 +588,12 @@ class _HomeState extends State<Home> {
           padding: EdgeInsets.all(16),
           child: Text(
               'Input Excel (row 1 = headers): PAN | Password.\n'
-              'Output columns written automatically: '
-              'PAN | Name | Mobile | Email | Status | Date of Status.\n\n'
-              'With Auto ON: after each login the app reads the dashboard, '
-              'opens Services > Know Your Refund Status, picks AY 2026-27, '
-              'submits, saves the result, logs out and moves to the next PAN.\n'
-              'You still complete captcha / OTP during each login.\n\n'
+              'Output columns: PAN | Name | Mobile | Email | Status | Date of Status.\n\n'
+              'Auto ON: after each login it reads the dashboard, opens '
+              'Services > Know Your Refund Status, picks AY 2026-27, submits, '
+              'saves, logs out and moves to the next PAN. Complete captcha / OTP '
+              'during each login.\n\n'
+              'If a step fails, tap the bug icon (top bar) to share the log.\n'
               'Use only for your own or authorised accounts.'),
         ),
       Expanded(
