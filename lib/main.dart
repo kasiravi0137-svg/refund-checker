@@ -35,7 +35,7 @@ String fillJs(String pan, String pwd) => '''
  var timer=setInterval(function(){
   if(++n>120){clearInterval(timer);return}
   if(step==0){var i=document.querySelector("input[name=panAdhaarUserId], input[type=text]");if(i){setV(i,P);step=1;setTimeout(function(){clickBtn('continue')},600)}}
-  else if(step==1){var w=document.querySelector("input[type=password]");if(w){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();step=2}}
+  else if(step==1){var w=document.querySelector("input[type=password]");if(w){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();step=2;setTimeout(function(){clickBtn('continue');setTimeout(function(){if(document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){clickBtn('continue')}},3000)},2000)}}
   else{clearInterval(timer)}
  },500);
 })();
@@ -260,7 +260,7 @@ class _HomeState extends State<Home> {
               style: const TextStyle(fontWeight: FontWeight.bold)),
           Text(loggedIn
               ? 'Logged in. Open the refund / filed returns page, then tap Capture.'
-              : 'Tap Continue on the password page. Complete captcha / OTP if asked.'),
+              : 'Logging in automatically. Complete captcha / OTP if asked.'),
           Row(children: [
             ElevatedButton(onPressed: capture, child: const Text('Capture')),
             const SizedBox(width: 8),
