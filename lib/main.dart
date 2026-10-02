@@ -38,8 +38,8 @@ String fillJs(String pan, String pwd) => '''
   var w=document.querySelector("input[type=password]");
   if(w){
    if(!pwdAt){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();pwdAt=now;return}
-   if(pwdClicks==0&&now-pwdAt>1000){var b=btn();if(b){b.click();pwdClicks=1;lastClick=now}return}
-   if(pwdClicks>0&&pwdClicks<3&&now-lastClick>1500&&document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){var b2=btn();if(b2){b2.click();pwdClicks++;lastClick=now}}
+   if(pwdClicks==0&&now-pwdAt>1200){var b=btn();if(b){b.click();pwdClicks=1;lastClick=now}return}
+   if(pwdClicks>0&&pwdClicks<3&&now-lastClick>2500&&document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){var b2=btn();if(b2){b2.click();pwdClicks++;lastClick=now}}
    return;
   }
   var i=document.querySelector("input[name=panAdhaarUserId], input[type=text]");
