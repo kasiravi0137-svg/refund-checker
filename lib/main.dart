@@ -158,6 +158,23 @@ String autoJs() => '''
    return best?attr(best,'href'):null;
  }
  function navTo(h){try{location.href=(new URL(h,location.href)).href;return true;}catch(e){try{location.hash=h;return true;}catch(x){return false;}}}
+ function interactiveFor(el){
+   if(!el)return null;
+   var down=el.querySelector&&el.querySelector('a[mat-list-item],a,[role=menuitem],[role=button],button,[tabindex]');
+   if(down)return down;
+   var mli=el.closest&&el.closest('a[mat-list-item],mat-list-item,[mat-list-item],a.mdc-list-item,[role=menuitem],[role=button],a,button');
+   if(mli)return mli;
+   return clickable(el);
+ }
+ function svCandidates(){
+   var lab=item('Services'); if(!lab)return [];
+   var out=[];
+   var a=lab.querySelector&&lab.querySelector('a[mat-list-item],a,[role=menuitem],[role=button],button,[tabindex]'); if(a)out.push(a);
+   var mli=lab.closest&&lab.closest('mat-list-item,[mat-list-item],a.mdc-list-item,[role=menuitem]'); if(mli)out.push(mli);
+   out.push(lab);
+   var pa=lab.closest&&lab.closest('a'); if(pa)out.push(pa);
+   var seen=[],res=[]; out.forEach(function(e){if(e&&seen.indexOf(e)<0){seen.push(e);res.push(e);}}); return res;
+ }
 
  function getName(){var m=text().match(/welcome\\s*back[,\\s]+([A-Za-z][A-Za-z .'-]{0,40})/i);return m?m[1].trim():'';}
  function getEmail(){var m=text().match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/);return m?m[0]:'';}
@@ -193,7 +210,7 @@ String autoJs() => '''
    return c[0];
  }
 
- var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svClicked=false,ayTried=0;
+ var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svList=null,svi=0,ayTried=0;
  function ready(w){return tick-acted>w;}
  function act(){acted=tick;}
  function fail(msg){dumpMenu(msg);post({t:'err',msg:msg});clearInterval(tmr);done=true;}
@@ -213,10 +230,10 @@ String autoJs() => '''
    }
    if(step==='nav'){
      var rl=item('Know Your Refund Status');
-     if(rl){log('refund link visible: '+desc(rl));realClick(rl);step='ay';act();return;}
+     if(rl){log('refund link visible: '+desc(rl));realClick(interactiveFor(rl));step='ay';act();return;}
      var rh=refundHref();
      if(rh){log('direct refund href: '+rh);navTo(rh);step='ay';act();return;}
-     if(menuOpen()){log('menu open');step='services';svClicked=false;act();return;}
+     if(menuOpen()){log('menu open');step='services';svList=null;svi=0;act();return;}
      if(cands===null){cands=toggleCands();ci=0;log('menu candidates: '+cands.length);}
      if(ready(10)){
        if(ci<cands.length){log('tap menu button '+(ci+1)+': '+desc(cands[ci]));realClick(cands[ci]);ci++;act();}
@@ -226,16 +243,15 @@ String autoJs() => '''
    }
    if(step==='services'){
      var rl2=item('Know Your Refund Status');
-     if(rl2){log('refund link: '+desc(rl2));realClick(rl2);step='ay';act();return;}
+     if(rl2){log('refund link: '+desc(rl2)+' -> '+desc(interactiveFor(rl2)));realClick(interactiveFor(rl2));step='ay';act();return;}
      var rh2=refundHref();
-     if(rh2&&svClicked){log('refund href after services: '+rh2);navTo(rh2);step='ay';act();return;}
-     if(!svClicked){
-       var sv=item('Services');
-       if(sv){log('services el: '+desc(sv)+' | click target: '+desc(clickable(sv)));realClick(sv);svClicked=true;act();}
-       else if(ready(12)){dumpMenu('Services element not found');step='nav';cands=null;ci=0;act();}
+     if(rh2){log('refund href after services: '+rh2);navTo(rh2);step='ay';act();return;}
+     if(svList===null){svList=svCandidates();svi=0;log('services targets: '+svList.length);}
+     if(svi<svList.length){
+       if(ready(8)){log('tap services target '+(svi+1)+': '+desc(svList[svi]));realClick(svList[svi]);svi++;act();}
        return;
      }
-     if(ready(30))fail('refund link not found after Services');
+     if(ready(14))fail('refund link not found after Services');
      return;
    }
    if(step==='ay'){
