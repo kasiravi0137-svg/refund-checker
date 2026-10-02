@@ -87,7 +87,7 @@ String autoJs() => '''
  function realClick(e){
    if(!e)return false; e=clickable(e);
    try{e.scrollIntoView({block:'center'});}catch(x){}
-   var ev=['pointerover','pointerenter','pointerdown','mousedown','focus','pointerup','mouseup','click'];
+   var ev=['pointerover','pointerenter','pointerdown','mousedown','focus','pointerup','mouseup'];
    for(var i=0;i<ev.length;i++){
      try{
        if(ev[i]==='focus'){if(e.focus)e.focus();continue;}
