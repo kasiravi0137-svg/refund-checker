@@ -29,15 +29,25 @@ String _s(Data? d) {
 String fillJs(String pan, String pwd) => '''
 (function(){
  var P=${jsonEncode(pan)}, W=${jsonEncode(pwd)};
- function setV(el,v){var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}
- function clickBtn(t){var b=[].slice.call(document.querySelectorAll('button')).find(function(x){return x.innerText.trim().toLowerCase()===t&&!x.disabled});if(b){b.click();return true}return false}
- var step=0,n=0;
+ function setV(el,v){var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}
+ function btn(){return [].slice.call(document.querySelectorAll('button')).find(function(x){return x.innerText.toLowerCase().indexOf('continue')>-1&&!x.disabled});}
+ var n=0,pwdAt=0,pwdClicks=0,lastClick=0,panLast=0;
  var timer=setInterval(function(){
-  if(++n>120){clearInterval(timer);return}
-  if(step==0){var i=document.querySelector("input[name=panAdhaarUserId], input[type=text]");if(i){setV(i,P);step=1;setTimeout(function(){clickBtn('continue')},600)}}
-  else if(step==1){var w=document.querySelector("input[type=password]");if(w){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();step=2;setTimeout(function(){clickBtn('continue');setTimeout(function(){if(document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){clickBtn('continue')}},3000)},2000)}}
-  else{clearInterval(timer)}
- },500);
+  var now=Date.now();
+  if(++n>960||location.href.indexOf('dashboard')>-1){clearInterval(timer);return}
+  var w=document.querySelector("input[type=password]");
+  if(w){
+   if(!pwdAt){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();pwdAt=now;return}
+   if(pwdClicks==0&&now-pwdAt>1200){var b=btn();if(b){b.click();pwdClicks=1;lastClick=now}return}
+   if(pwdClicks>0&&pwdClicks<3&&now-lastClick>2500&&document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){var b2=btn();if(b2){b2.click();pwdClicks++;lastClick=now}}
+   return;
+  }
+  var i=document.querySelector("input[name=panAdhaarUserId], input[type=text]");
+  if(i){
+   if(i.value!==P){setV(i,P);lastClick=now;return}
+   if(now-lastClick>500&&now-panLast>1500){var b3=btn();if(b3){b3.click();panLast=now}}
+  }
+ },250);
 })();
 ''';
 
