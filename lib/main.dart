@@ -210,7 +210,7 @@ String autoJs() => '''
    return c[0];
  }
 
- var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svList=null,svi=0,ayTried=0;
+ var step='dash',tick=0,acted=-50,done=false,dashSent=false,cands=null,ci=0,svList=null,svi=0,ayTried=0,dashTries=0,welcomeAt=0;
  function ready(w){return tick-acted>w;}
  function act(){acted=tick;}
  function fail(msg){dumpMenu(msg);post({t:'err',msg:msg});clearInterval(tmr);done=true;}
@@ -222,9 +222,22 @@ String autoJs() => '''
    try{
    if(step==='dash'){
      if(T.length<40)return;
-     if(!dashSent&&(low.indexOf('welcome')>-1||/[A-Z]{5}\\d{4}[A-Z]/.test(T))){
-       post({t:'dash',name:getName(),mobile:getMobile(),email:getEmail()});
-       dashSent=true;step='nav';cands=null;ci=0;act();log('dashboard captured, opening menu');
+     if(low.indexOf('welcome')>-1){
+       if(!welcomeAt)welcomeAt=tick;
+       var em=getEmail(),mo=getMobile();
+       if(em||mo||tick-welcomeAt>18){
+         post({t:'dash',name:getName(),mobile:mo,email:em});
+         dashSent=true;step='nav';cands=null;ci=0;act();log('dashboard captured: '+getName()+' / '+mo+' / '+em);
+       }
+       return;
+     }
+     if(ready(6)){
+       dashTries++;
+       var d=item('Dashboard');
+       if(d){log('navigating to Dashboard: '+desc(interactiveFor(d)));realClick(interactiveFor(d));}
+       else{var base=location.href.split('#')[0];log('nav to dashboard url');navTo(base+'#/dashboard');}
+       act();
+       if(dashTries>6){post({t:'dash',name:getName(),mobile:getMobile(),email:getEmail()});dashSent=true;step='nav';cands=null;ci=0;act();log('proceeding without welcome card');}
      }
      return;
    }
@@ -449,6 +462,12 @@ class _HomeState extends State<Home> {
       auto = '';
     });
     await logLine('---- START ${accts[i].pan} ----');
+    // Full logout so the next PAN logs in fresh: the portal keeps its session
+    // token in session/local storage, which a plain reload would not clear.
+    try {
+      await ctrl.runJavaScript(
+          'try{sessionStorage.clear();localStorage.clear();}catch(e){}');
+    } catch (_) {}
     await WebViewCookieManager().clearCookies();
     await ctrl.clearLocalStorage();
     await ctrl.loadRequest(Uri.parse(loginUrl));
@@ -574,6 +593,62 @@ class _HomeState extends State<Home> {
     );
   }
 
+  void showFull(Acct a) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(a.pan),
+        content: SingleChildScrollView(
+          child: Text('Name: ${a.name}\nMobile: ${a.mobile}\nEmail: ${a.email}\n\n'
+              'Status:\n${a.status.isEmpty ? "Pending" : a.status}\n\n'
+              'Date of Status: ${a.date}'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Widget resultsTable() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.vertical,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 18,
+          dataRowMinHeight: 40,
+          dataRowMaxHeight: 96,
+          columns: const [
+            DataColumn(label: Text('PAN')),
+            DataColumn(label: Text('Name')),
+            DataColumn(label: Text('Mobile')),
+            DataColumn(label: Text('Email')),
+            DataColumn(label: Text('Status')),
+            DataColumn(label: Text('Date')),
+          ],
+          rows: accts
+              .map((a) => DataRow(cells: [
+                    DataCell(Text(a.pan), onTap: () => showFull(a)),
+                    DataCell(Text(a.name)),
+                    DataCell(Text(a.mobile)),
+                    DataCell(Text(a.email)),
+                    DataCell(
+                        SizedBox(
+                            width: 260,
+                            child: Text(a.status.isEmpty ? 'Pending' : a.status,
+                                maxLines: 4, overflow: TextOverflow.ellipsis)),
+                        onTap: () => showFull(a)),
+                    DataCell(Text(a.date)),
+                  ]))
+              .toList(),
+        ),
+      ),
+    );
+  }
+
   Widget listView() {
     return Column(children: [
       Padding(
@@ -591,6 +666,11 @@ class _HomeState extends State<Home> {
                 },
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Start')),
+          if (accts.isNotEmpty)
+            ElevatedButton.icon(
+                onPressed: share,
+                icon: const Icon(Icons.download),
+                label: const Text('Export Excel')),
           Row(mainAxisSize: MainAxisSize.min, children: [
             const Text('Auto'),
             Switch(
@@ -605,27 +685,15 @@ class _HomeState extends State<Home> {
           child: Text(
               'Input Excel (row 1 = headers): PAN | Password.\n'
               'Output columns: PAN | Name | Mobile | Email | Status | Date of Status.\n\n'
-              'Auto ON: after each login it reads the dashboard, opens '
-              'Services > Know Your Refund Status, picks AY 2026-27, submits, '
-              'saves, logs out and moves to the next PAN. Complete captcha / OTP '
-              'during each login.\n\n'
-              'If a step fails, tap the bug icon (top bar) to share the log.\n'
+              'Auto ON: after each login it opens the dashboard, reads Name / '
+              'Mobile / Email, opens Services > Know Your Refund Status, picks '
+              'AY 2026-27, submits, saves, logs out and moves to the next PAN. '
+              'Complete captcha / OTP during each login.\n\n'
+              'Tap a row to see full details. Use Export Excel (or the share icon) '
+              'to get the file; the bug icon shares the log.\n'
               'Use only for your own or authorised accounts.'),
         ),
-      Expanded(
-        child: ListView(
-          children: accts
-              .map((a) => ListTile(
-                    title: Text(a.pan),
-                    subtitle: Text([
-                      a.name,
-                      a.status.isEmpty ? 'Pending' : a.status
-                    ].where((e) => e.isNotEmpty).join(' - ')),
-                    trailing: Text(a.date, style: const TextStyle(fontSize: 11)),
-                  ))
-              .toList(),
-        ),
-      ),
+      if (accts.isNotEmpty) Expanded(child: resultsTable()),
     ]);
   }
 
