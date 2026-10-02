@@ -1,0 +1,32 @@
+name: Build APK
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Generate Android project
+        run: |
+          mkdir -p /tmp/keep
+          cp pubspec.yaml /tmp/keep/ && cp lib/main.dart /tmp/keep/
+          flutter create . --platforms=android --org com.example --project-name refund_checker
+          cp /tmp/keep/pubspec.yaml pubspec.yaml && cp /tmp/keep/main.dart lib/main.dart
+          rm -rf test
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: refund-checker-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
