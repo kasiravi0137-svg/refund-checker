@@ -17,3 +17,6 @@ dependencies:
 
 flutter:
   uses-material-design: true
+
+dependency_overrides:
+  archive: ^3.6.1
