@@ -336,6 +336,7 @@ class _HomeState extends State<Home> {
           onMessageReceived: (m) => onDriver(m.message))
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (url) {
+          if (url.isEmpty || url.startsWith('about:')) return;
           if (current >= 0 && !injected && !loggedIn) {
             injected = true;
             final a = accts[current];
@@ -470,6 +471,11 @@ class _HomeState extends State<Home> {
     } catch (_) {}
     await WebViewCookieManager().clearCookies();
     await ctrl.clearLocalStorage();
+    // Force a fresh document load. Loading the #/login hash route directly can
+    // soft-navigate the already-loaded SPA to the portal home instead of the
+    // login form, so bounce through about:blank first.
+    await ctrl.loadRequest(Uri.parse('about:blank'));
+    await Future.delayed(const Duration(milliseconds: 400));
     await ctrl.loadRequest(Uri.parse(loginUrl));
   }
 
