@@ -31,6 +31,8 @@ jobs:
           sed -i 's/version "1.7.10"/version "1.9.24"/' android/settings.gradle
           sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle
+          sed -i -E 's/("com.android.application" version ")[0-9.]+"/\18.6.0"/' android/settings.gradle
+          sed -i -E 's|gradle-[0-9.]+-all.zip|gradle-8.7-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Get dependencies
         run: flutter pub get
