@@ -976,49 +976,61 @@ class _HomeState extends State<Home> {
 
   Widget runView() {
     final a = accts[current];
-    return Column(children: [
-      Expanded(child: WebViewWidget(controller: ctrl)),
-      Container(
-        width: double.infinity,
-        color: Colors.grey.shade200,
-        padding: const EdgeInsets.all(10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const SizedBox(
-                width: 26,
-                height: 26,
-                child: CircularProgressIndicator(strokeWidth: 3)),
-            const SizedBox(width: 10),
-            Text('${current + 1}/${accts.length}',
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 18)),
-            const SizedBox(width: 10),
-            Expanded(
-                child: Text(a.pan,
-                    style: const TextStyle(fontWeight: FontWeight.bold))),
-          ]),
-          const SizedBox(height: 4),
-          Text(loggedIn
-              ? (autoMode
-                  ? (auto.isEmpty ? 'Logged in. Running automatically...' : auto)
-                  : 'Logged in. Open the refund page, then tap Capture.')
-              : 'Logging in automatically. If captcha / OTP / wrong password '
-                  'comes, this PAN is skipped and noted in Status.'),
-          const SizedBox(height: 6),
-          Row(children: [
-            ElevatedButton(onPressed: capture, child: const Text('Capture')),
-            const SizedBox(width: 8),
-            OutlinedButton(onPressed: advance, child: const Text('Skip')),
-            const SizedBox(width: 8),
-            OutlinedButton(
-                onPressed: () {
-                  loginWatch?.cancel();
-                  WakelockPlus.disable();
-                  setState(() => current = -1);
-                },
-                child: const Text('Stop')),
-          ]),
-        ]),
+    return Stack(children: [
+      Positioned.fill(child: WebViewWidget(controller: ctrl)),
+      // Full-screen overlay: blocks all touches to the WebView underneath.
+      Positioned.fill(
+        child: Container(
+          color: const Color(0xFAFAFAFC),
+          child: SafeArea(
+            child: Column(children: [
+              const Spacer(flex: 3),
+              SizedBox(
+                width: 150,
+                height: 150,
+                child: Stack(alignment: Alignment.center, children: [
+                  const SizedBox(
+                    width: 150,
+                    height: 150,
+                    child: CircularProgressIndicator(
+                        value: 1,
+                        strokeWidth: 4,
+                        color: Color(0xFFE3E3E8)),
+                  ),
+                  const SizedBox(
+                    width: 150,
+                    height: 150,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 4, color: Color(0xFF2F80ED)),
+                  ),
+                  Text('${current + 1}/${accts.length}',
+                      style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w200,
+                          color: Color(0xFF222222))),
+                ]),
+              ),
+              const SizedBox(height: 36),
+              Text(a.pan,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF222222))),
+              const SizedBox(height: 6),
+              Text(loggedIn ? 'Reading refund status...' : 'Logging in...',
+                  style: const TextStyle(fontSize: 13, color: Colors.black54)),
+              const Spacer(flex: 4),
+              OutlinedButton(
+                  onPressed: () {
+                    loginWatch?.cancel();
+                    WakelockPlus.disable();
+                    setState(() => current = -1);
+                  },
+                  child: const Text('Stop')),
+              const SizedBox(height: 24),
+            ]),
+          ),
+        ),
       ),
     ]);
   }
