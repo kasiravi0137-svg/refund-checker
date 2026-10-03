@@ -34,7 +34,7 @@ String fillJs(String pan, String pwd) => '''
  var P=${jsonEncode(pan)}, W=${jsonEncode(pwd)};
  function setV(el,v){var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}
  function btn(){return [].slice.call(document.querySelectorAll('button')).find(function(x){return x.innerText.toLowerCase().indexOf('continue')>-1&&!x.disabled});}
- var n=0,pwdAt=0,pwdClicks=0,lastClick=0,panLast=0;
+ var n=0,pwdAt=0,pwdClicks=0,lastClick=0,panLast=0,failed=false;
  var timer=setInterval(function(){
   var now=Date.now();
   if(++n>1600||location.href.indexOf('dashboard')>-1){clearInterval(timer);return}
@@ -42,6 +42,7 @@ String fillJs(String pan, String pwd) => '''
   if(w){
    if(!pwdAt){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();pwdAt=now;return}
    if(pwdClicks==0&&now-pwdAt>1200){var b=btn();if(b){b.click();pwdClicks=1;lastClick=now}return}
+   if(pwdClicks>0&&!failed&&document.body.innerText.toLowerCase().indexOf('invalid password')>-1){failed=true;clearInterval(timer);try{Refund.postMessage(JSON.stringify({t:'loginfail',msg:'Invalid password'}))}catch(e){}return}
    if(pwdClicks>0&&pwdClicks<3&&now-lastClick>2500&&document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){var b2=btn();if(b2){b2.click();pwdClicks++;lastClick=now}}
    return;
   }
