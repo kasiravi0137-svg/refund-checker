@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:excel/excel.dart';
@@ -326,6 +327,7 @@ class _HomeState extends State<Home> {
   bool autoMode = true;
   String auto = '';
   late final WebViewController ctrl;
+  Timer? loginWatch;
 
   @override
   void initState() {
@@ -349,6 +351,7 @@ class _HomeState extends State<Home> {
         },
         onUrlChange: (c) {
           if (current >= 0 && (c.url ?? '').contains('dashboard') && !loggedIn) {
+            loginWatch?.cancel();
             setState(() => loggedIn = true);
             if (autoMode && !autoStarted) {
               autoStarted = true;
@@ -414,6 +417,9 @@ class _HomeState extends State<Home> {
         if (mounted) setState(() => auto = 'Saved. Next PAN...');
         await advance();
         break;
+      case 'loginfail':
+        if (autoMode) await onLoginFailed((o['msg'] ?? 'login error').toString());
+        break;
       case 'err':
         final m = (o['msg'] ?? '').toString();
         await logLine('ERR [${a.pan}] $m');
@@ -462,6 +468,12 @@ class _HomeState extends State<Home> {
       autoStarted = false;
       auto = '';
     });
+    loginWatch?.cancel();
+    loginWatch = Timer(const Duration(seconds: 180), () {
+      if (current == i && !loggedIn && autoMode) {
+        onLoginFailed('login not completed (check password / OTP)');
+      }
+    });
     await logLine('---- START ${accts[i].pan} ----');
     // Full logout so the next PAN logs in fresh: the portal keeps its session
     // token in session/local storage, which a plain reload would not clear.
@@ -487,6 +499,7 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> advance() async {
+    loginWatch?.cancel();
     final n = nextPending(current + 1);
     if (n < 0) {
       setState(() => current = -1);
@@ -494,6 +507,20 @@ class _HomeState extends State<Home> {
     } else {
       await start(n);
     }
+  }
+
+  Future<void> onLoginFailed(String reason) async {
+    loginWatch?.cancel();
+    if (current < 0 || current >= accts.length) return;
+    final a = accts[current];
+    if (a.status.isEmpty) a.status = 'ISSUE: $reason';
+    await logLine('LOGINFAIL [${a.pan}] $reason');
+    await writeResults();
+    if (mounted) {
+      setState(() => auto = 'Login failed: $reason. Moving to next PAN...');
+      msg('Login failed: $reason');
+    }
+    await advance();
   }
 
   Future<String> pageText() async {
@@ -718,7 +745,8 @@ class _HomeState extends State<Home> {
               ? (autoMode
                   ? (auto.isEmpty ? 'Logged in. Running automatically...' : auto)
                   : 'Logged in. Open the refund page, then tap Capture.')
-              : 'Logging in automatically. Complete captcha / OTP if asked.'),
+              : 'Logging in automatically. Complete captcha / OTP if asked.\n'
+                  'Wrong password? Tap Skip to jump to the next PAN.'),
           const SizedBox(height: 6),
           Row(children: [
             ElevatedButton(onPressed: capture, child: const Text('Capture')),
@@ -726,7 +754,7 @@ class _HomeState extends State<Home> {
             OutlinedButton(onPressed: advance, child: const Text('Skip')),
             const SizedBox(width: 8),
             OutlinedButton(
-                onPressed: () => setState(() => current = -1),
+                onPressed: () { loginWatch?.cancel(); setState(() => current = -1); },
                 child: const Text('Stop')),
           ]),
         ]),
