@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:xml/xml.dart' as xx;
 
@@ -131,12 +132,23 @@ List<List<String>> readXlsxRows(List<int> bytes) {
   return out;
 }
 
-// ---- Login auto-fill (unchanged logic) ----
+// ---- Login auto-fill (+ captcha / OTP / invalid password skip) ----
 String fillJs(String pan, String pwd) => '''
 (function(){
  var P=${jsonEncode(pan)}, W=${jsonEncode(pwd)};
  function setV(el,v){var s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));el.dispatchEvent(new Event('blur',{bubbles:true}));}
  function btn(){return [].slice.call(document.querySelectorAll('button')).find(function(x){return x.innerText.toLowerCase().indexOf('continue')>-1&&!x.disabled});}
+ function need(){
+  var ins=[].slice.call(document.querySelectorAll('input')).filter(function(x){return x.offsetParent!==null&&x.type!=='hidden'});
+  for(var k=0;k<ins.length;k++){var x=ins[k];var key=((x.name||'')+' '+(x.id||'')+' '+(x.placeholder||'')+' '+(x.getAttribute('aria-label')||'')+' '+(x.getAttribute('formcontrolname')||'')).toLowerCase();
+   if(key.indexOf('captcha')>-1)return 'Captcha required';
+   if(key.indexOf('otp')>-1)return 'OTP required';}
+  var t=document.body.innerText.toLowerCase();
+  if(t.indexOf('enter the captcha')>-1||t.indexOf('enter captcha')>-1||t.indexOf('enter the characters')>-1)return 'Captcha required';
+  if(t.indexOf('otp has been sent')>-1||t.indexOf('enter otp')>-1||t.indexOf('enter the otp')>-1||t.indexOf('enter the 6 digit')>-1)return 'OTP required';
+  return '';
+ }
+ function skipNow(q){failed=true;clearInterval(timer);try{Refund.postMessage(JSON.stringify({t:'loginfail',msg:q+' - skipped'}))}catch(e){}}
  var n=0,pwdAt=0,pwdClicks=0,lastClick=0,panLast=0,failed=false;
  var timer=setInterval(function(){
   var now=Date.now();
@@ -146,9 +158,11 @@ String fillJs(String pan, String pwd) => '''
    if(!pwdAt){setV(w,W);var c=document.querySelector("input[type=checkbox]");if(c&&!c.checked)c.click();pwdAt=now;return}
    if(pwdClicks==0&&now-pwdAt>1200){var b=btn();if(b){b.click();pwdClicks=1;lastClick=now}return}
    if(pwdClicks>0&&!failed&&document.body.innerText.toLowerCase().indexOf('invalid password')>-1){failed=true;clearInterval(timer);try{Refund.postMessage(JSON.stringify({t:'loginfail',msg:'Invalid password'}))}catch(e){}return}
+   if(pwdClicks>0&&!failed&&n>10){var q=need();if(q){skipNow(q);return}}
    if(pwdClicks>0&&pwdClicks<3&&now-lastClick>2500&&document.body.innerText.toLowerCase().indexOf('not authenticated')>-1){var b2=btn();if(b2){b2.click();pwdClicks++;lastClick=now}}
    return;
   }
+  if(!failed&&n>20){var q2=need();if(q2){skipNow(q2);return}}
   var i=document.querySelector("input[name=panAdhaarUserId], input[type=text]");
   if(i){
    if(i.value!==P){setV(i,P);lastClick=now;return}
@@ -502,7 +516,6 @@ class _HomeState extends State<Home> {
         break;
       case 'diag':
         await logLine('DIAG [${a.pan}]\n${(o['data'] ?? '').toString()}');
-        if (mounted) msg('Diagnostics saved. Tap the log icon to share.');
         break;
       case 'dash':
         if (a.name.isEmpty) a.name = (o['name'] ?? '').toString();
@@ -527,13 +540,12 @@ class _HomeState extends State<Home> {
       case 'err':
         final m = (o['msg'] ?? '').toString();
         await logLine('ERR [${a.pan}] $m');
-        if (a.status.isEmpty) a.status = 'ISSUE: $m';
+        if (a.status.isEmpty) a.status = 'ISSUE: $m - skipped';
         await writeResults();
         if (mounted) {
-          setState(() => auto =
-              'Auto step failed ($m). Finish manually then Capture, or Skip.');
-          msg('Auto failed: $m');
+          setState(() => auto = 'Issue ($m). Moving to next PAN...');
         }
+        if (autoMode) await advance();
         break;
     }
   }
@@ -611,6 +623,9 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> start(int i) async {
+    try {
+      await WakelockPlus.enable();
+    } catch (_) {}
     setState(() {
       current = i;
       loggedIn = false;
@@ -652,6 +667,9 @@ class _HomeState extends State<Home> {
     loginWatch?.cancel();
     final n = nextPending(current + 1);
     if (n < 0) {
+      try {
+        await WakelockPlus.disable();
+      } catch (_) {}
       setState(() => current = -1);
       msg('All done. Tap the share icon to get the Excel.');
     } else {
@@ -747,6 +765,7 @@ class _HomeState extends State<Home> {
       msg('Nothing saved yet');
       return;
     }
+    await writeResults();
     await Share.shareXFiles([XFile(outPath!)]);
   }
 
@@ -821,7 +840,11 @@ class _HomeState extends State<Home> {
                     DataCell(
                         SizedBox(
                             width: 260,
-                            child: Text(a.status.isEmpty ? 'Pending' : a.status,
+                            child: Text(a.status,
+                                style: TextStyle(
+                                    color: a.status.startsWith('ISSUE')
+                                        ? Colors.red
+                                        : null),
                                 maxLines: 4, overflow: TextOverflow.ellipsis)),
                         onTap: () => showFull(a)),
                     DataCell(Text(a.date)),
@@ -871,7 +894,8 @@ class _HomeState extends State<Home> {
               'Auto ON: after each login it opens the dashboard, reads Name / '
               'Mobile / Email, opens Services > Know Your Refund Status, picks '
               'AY 2026-27, submits, saves, logs out and moves to the next PAN. '
-              'Complete captcha / OTP during each login.\n\n'
+              'If captcha / OTP / wrong password comes, that PAN is skipped and the reason is written in Status. '
+              'Screen stays on while running.\n\n'
               'Tap a row to see full details. Use Export Excel (or the share icon) '
               'to get the file; the bug icon shares the log.\n'
               'Use only for your own or authorised accounts.'),
@@ -889,14 +913,27 @@ class _HomeState extends State<Home> {
         color: Colors.grey.shade200,
         padding: const EdgeInsets.all(10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('${a.pan}  (${current + 1}/${accts.length})',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          Row(children: [
+            const SizedBox(
+                width: 26,
+                height: 26,
+                child: CircularProgressIndicator(strokeWidth: 3)),
+            const SizedBox(width: 10),
+            Text('${current + 1}/${accts.length}',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 18)),
+            const SizedBox(width: 10),
+            Expanded(
+                child: Text(a.pan,
+                    style: const TextStyle(fontWeight: FontWeight.bold))),
+          ]),
+          const SizedBox(height: 4),
           Text(loggedIn
               ? (autoMode
                   ? (auto.isEmpty ? 'Logged in. Running automatically...' : auto)
                   : 'Logged in. Open the refund page, then tap Capture.')
-              : 'Logging in automatically. Complete captcha / OTP if asked.\n'
-                  'Wrong password? Tap Skip to jump to the next PAN.'),
+              : 'Logging in automatically. If captcha / OTP / wrong password '
+                  'comes, this PAN is skipped and noted in Status.'),
           const SizedBox(height: 6),
           Row(children: [
             ElevatedButton(onPressed: capture, child: const Text('Capture')),
@@ -904,7 +941,11 @@ class _HomeState extends State<Home> {
             OutlinedButton(onPressed: advance, child: const Text('Skip')),
             const SizedBox(width: 8),
             OutlinedButton(
-                onPressed: () { loginWatch?.cancel(); setState(() => current = -1); },
+                onPressed: () {
+                  loginWatch?.cancel();
+                  WakelockPlus.disable();
+                  setState(() => current = -1);
+                },
                 child: const Text('Stop')),
           ]),
         ]),
