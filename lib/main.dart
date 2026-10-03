@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:archive/archive.dart' as ar;
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:xml/xml.dart' as xx;
 
 const loginUrl = 'https://eportal.incometax.gov.in/iec/foservices/#/login';
 
@@ -26,6 +28,107 @@ String _s(Data? d) {
   if (v == null) return '';
   if (v is TextCellValue) return v.value;
   return v.toString();
+}
+
+
+// ---- Fallback .xlsx reader (used if the excel package cannot open a file) ----
+int _colIdx(String ref) {
+  var n = 0;
+  for (final u in ref.codeUnits) {
+    if (u >= 65 && u <= 90) {
+      n = n * 26 + (u - 64);
+    } else if (u >= 97 && u <= 122) {
+      n = n * 26 + (u - 96);
+    } else {
+      break;
+    }
+  }
+  return n - 1;
+}
+
+List<List<String>> readXlsxRows(List<int> bytes) {
+  final arc = ar.ZipDecoder().decodeBytes(bytes);
+  String? text(String name) {
+    for (final f in arc.files) {
+      if (f.isFile && f.name.toLowerCase() == name.toLowerCase()) {
+        return utf8.decode(f.content as List<int>, allowMalformed: true);
+      }
+    }
+    return null;
+  }
+
+  final shared = <String>[];
+  final sst = text('xl/sharedStrings.xml');
+  if (sst != null) {
+    for (final si in xx.XmlDocument.parse(sst).findAllElements('si')) {
+      shared.add(si.findAllElements('t').map((e) => e.innerText).join());
+    }
+  }
+  var sheetPath = 'xl/worksheets/sheet1.xml';
+  final wb = text('xl/workbook.xml');
+  final rels = text('xl/_rels/workbook.xml.rels');
+  if (wb != null && rels != null) {
+    final sheets = xx.XmlDocument.parse(wb).findAllElements('sheet');
+    if (sheets.isNotEmpty) {
+      String? rid;
+      for (final a in sheets.first.attributes) {
+        if (a.name.local == 'id') rid = a.value;
+      }
+      if (rid != null) {
+        for (final r in xx.XmlDocument.parse(rels).findAllElements('Relationship')) {
+          if (r.getAttribute('Id') == rid) {
+            var t = r.getAttribute('Target') ?? '';
+            if (t.startsWith('/')) {
+              t = t.substring(1);
+            } else {
+              t = 'xl/$t';
+            }
+            sheetPath = t;
+          }
+        }
+      }
+    }
+  }
+  final sx = text(sheetPath) ?? text('xl/worksheets/sheet1.xml');
+  if (sx == null) throw Exception('sheet not found');
+  final rows = <int, Map<int, String>>{};
+  var rowNo = 0;
+  for (final r in xx.XmlDocument.parse(sx).findAllElements('row')) {
+    rowNo = int.tryParse(r.getAttribute('r') ?? '') ?? (rowNo + 1);
+    var colNo = -1;
+    for (final c in r.findElements('c')) {
+      final ref = c.getAttribute('r');
+      colNo = ref != null ? _colIdx(ref) : colNo + 1;
+      final t = c.getAttribute('t');
+      var v = '';
+      if (t == 'inlineStr') {
+        v = c.findAllElements('t').map((e) => e.innerText).join();
+      } else {
+        final ve = c.findElements('v');
+        if (ve.isNotEmpty) {
+          v = ve.first.innerText;
+          if (t == 's') {
+            final k = int.tryParse(v.trim());
+            v = (k != null && k >= 0 && k < shared.length) ? shared[k] : '';
+          } else if (RegExp(r'^-?\d+\.0+$').hasMatch(v.trim())) {
+            v = v.trim().split('.').first;
+          }
+        }
+      }
+      rows.putIfAbsent(rowNo, () => <int, String>{})[colNo] = v;
+    }
+  }
+  final keys = rows.keys.toList()..sort();
+  final out = <List<String>>[];
+  for (final k in keys) {
+    final m = rows[k]!;
+    var mx = -1;
+    for (final c in m.keys) {
+      if (c > mx) mx = c;
+    }
+    out.add(List<String>.generate(mx + 1, (i) => (m[i] ?? '').trim()));
+  }
+  return out;
 }
 
 // ---- Login auto-fill (unchanged logic) ----
@@ -443,17 +546,29 @@ class _HomeState extends State<Home> {
       final r = await FilePicker.platform.pickFiles(
           type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
       if (r == null) return;
-      if (r.files.single.bytes == null) {
+      final bytes = r.files.single.bytes;
+      if (bytes == null) {
         msg('Could not read the file. Copy it to Downloads and select again.');
         return;
       }
-      final ex = Excel.decodeBytes(r.files.single.bytes!);
-      final sheet = ex.tables[ex.tables.keys.first]!;
+      Excel? ex;
+      List<List<String>> table;
+      try {
+        ex = Excel.decodeBytes(bytes);
+        final sh = ex.tables[ex.tables.keys.first]!;
+        table = [
+          for (var i = 0; i < sh.maxRows; i++)
+            [for (final d in sh.row(i)) _s(d).trim()]
+        ];
+      } catch (_) {
+        ex = null;
+        table = readXlsxRows(bytes);
+      }
       var cName = -1, cPan = -1, cPwd = -1;
-      if (sheet.maxRows > 0) {
-        final h = sheet.row(0);
+      if (table.isNotEmpty) {
+        final h = table.first;
         for (var c = 0; c < h.length; c++) {
-          final t = _s(h[c]).toLowerCase();
+          final t = h[c].toLowerCase();
           if (t.contains('pan')) {
             cPan = c;
           } else if (t.contains('pass')) {
@@ -468,12 +583,15 @@ class _HomeState extends State<Home> {
         cPan = 1;
         cPwd = 2;
       }
+      String g(List<String> row, int c) =>
+          c >= 0 && c < row.length ? row[c].trim() : '';
       final list = <Acct>[];
-      for (var i = 1; i < sheet.maxRows; i++) {
-        final row = sheet.row(i);
-        String g(int c) => c >= 0 && c < row.length ? _s(row[c]).trim() : '';
-        if (g(cPan).isEmpty || g(cPwd).isEmpty) continue;
-        list.add(Acct(i, g(cPan).toUpperCase(), g(cPwd))..name = g(cName));
+      for (var i = 1; i < table.length; i++) {
+        final row = table[i];
+        final pan = g(row, cPan).toUpperCase();
+        final pwd = g(row, cPwd);
+        if (pan.isEmpty || pwd.isEmpty) continue;
+        list.add(Acct(i, pan, pwd)..name = g(row, cName));
       }
       final dir = await getApplicationDocumentsDirectory();
       setState(() {
