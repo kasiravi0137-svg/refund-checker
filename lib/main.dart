@@ -402,7 +402,7 @@ class _HomeState extends State<Home> {
         if (mounted) msg('Diagnostics saved. Tap the log icon to share.');
         break;
       case 'dash':
-        a.name = (o['name'] ?? '').toString();
+        if (a.name.isEmpty) a.name = (o['name'] ?? '').toString();
         a.mobile = (o['mobile'] ?? '').toString();
         a.email = (o['email'] ?? '').toString();
         await logLine(
@@ -448,8 +448,8 @@ class _HomeState extends State<Home> {
     for (var i = 1; i < sheet.maxRows; i++) {
       final row = sheet.row(i);
       String g(int c) => c < row.length ? _s(row[c]).trim() : '';
-      if (g(0).isEmpty || g(1).isEmpty) continue;
-      list.add(Acct(i, g(0).toUpperCase(), g(1)));
+      if (g(1).isEmpty || g(2).isEmpty) continue;
+      list.add(Acct(i, g(1).toUpperCase(), g(2))..name = g(0));
     }
     final dir = await getApplicationDocumentsDirectory();
     setState(() {
@@ -579,15 +579,15 @@ class _HomeState extends State<Home> {
     List<CellValue?> rowOf(List<String> v) =>
         v.map((e) => TextCellValue(e) as CellValue?).toList();
     s.appendRow(rowOf([
-      'PAN Card Number',
       'Name',
+      'PAN Card Number',
       'Mobile Number',
       'Email',
       'Status',
       'Date of Status'
     ]));
     for (final a in accts) {
-      s.appendRow(rowOf([a.pan, a.name, a.mobile, a.email, a.status, a.date]));
+      s.appendRow(rowOf([a.name, a.pan, a.mobile, a.email, a.status, a.date]));
     }
     final bytes = ex.save();
     if (bytes != null) await File(outPath!).writeAsBytes(bytes, flush: true);
@@ -656,8 +656,8 @@ class _HomeState extends State<Home> {
           dataRowMinHeight: 40,
           dataRowMaxHeight: 96,
           columns: const [
-            DataColumn(label: Text('PAN')),
             DataColumn(label: Text('Name')),
+            DataColumn(label: Text('PAN')),
             DataColumn(label: Text('Mobile')),
             DataColumn(label: Text('Email')),
             DataColumn(label: Text('Status')),
@@ -665,8 +665,8 @@ class _HomeState extends State<Home> {
           ],
           rows: accts
               .map((a) => DataRow(cells: [
-                    DataCell(Text(a.pan), onTap: () => showFull(a)),
-                    DataCell(Text(a.name)),
+                    DataCell(Text(a.name), onTap: () => showFull(a)),
+                    DataCell(Text(a.pan)),
                     DataCell(Text(a.mobile)),
                     DataCell(Text(a.email)),
                     DataCell(
@@ -717,8 +717,8 @@ class _HomeState extends State<Home> {
         const Padding(
           padding: EdgeInsets.all(16),
           child: Text(
-              'Input Excel (row 1 = headers): PAN | Password.\n'
-              'Output columns: PAN | Name | Mobile | Email | Status | Date of Status.\n\n'
+              'Input Excel (row 1 = headers): Name | PAN Card Number | Password.\n'
+              'Output columns: Name | PAN Card Number | Mobile | Email | Status | Date of Status.\n\n'
               'Auto ON: after each login it opens the dashboard, reads Name / '
               'Mobile / Email, opens Services > Know Your Refund Status, picks '
               'AY 2026-27, submits, saves, logs out and moves to the next PAN. '
