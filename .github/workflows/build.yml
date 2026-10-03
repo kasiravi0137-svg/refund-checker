@@ -28,6 +28,7 @@ jobs:
           cp /tmp/keep/pubspec.yaml pubspec.yaml && cp /tmp/keep/main.dart lib/main.dart
           rm -rf test
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="refund_checker"/android:label="Refund Checker"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/version "1.7.10"/version "1.9.24"/' android/settings.gradle
           sed -i 's/ext.kotlin_version = .*/ext.kotlin_version = "1.9.24"/' android/build.gradle
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' android/app/build.gradle
@@ -36,6 +37,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Generate app icon
+        run: dart run flutter_launcher_icons
 
       - name: Build APK
         run: flutter build apk --release
