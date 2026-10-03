@@ -439,26 +439,57 @@ class _HomeState extends State<Home> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
   Future<void> pick() async {
-    final r = await FilePicker.platform.pickFiles(
-        type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
-    if (r == null || r.files.single.bytes == null) return;
-    final ex = Excel.decodeBytes(r.files.single.bytes!);
-    final sheet = ex.tables[ex.tables.keys.first]!;
-    final list = <Acct>[];
-    for (var i = 1; i < sheet.maxRows; i++) {
-      final row = sheet.row(i);
-      String g(int c) => c < row.length ? _s(row[c]).trim() : '';
-      if (g(1).isEmpty || g(2).isEmpty) continue;
-      list.add(Acct(i, g(1).toUpperCase(), g(2))..name = g(0));
+    try {
+      final r = await FilePicker.platform.pickFiles(
+          type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
+      if (r == null) return;
+      if (r.files.single.bytes == null) {
+        msg('Could not read the file. Copy it to Downloads and select again.');
+        return;
+      }
+      final ex = Excel.decodeBytes(r.files.single.bytes!);
+      final sheet = ex.tables[ex.tables.keys.first]!;
+      var cName = -1, cPan = -1, cPwd = -1;
+      if (sheet.maxRows > 0) {
+        final h = sheet.row(0);
+        for (var c = 0; c < h.length; c++) {
+          final t = _s(h[c]).toLowerCase();
+          if (t.contains('pan')) {
+            cPan = c;
+          } else if (t.contains('pass')) {
+            cPwd = c;
+          } else if (t.contains('name')) {
+            cName = c;
+          }
+        }
+      }
+      if (cPan < 0 || cPwd < 0) {
+        cName = 0;
+        cPan = 1;
+        cPwd = 2;
+      }
+      final list = <Acct>[];
+      for (var i = 1; i < sheet.maxRows; i++) {
+        final row = sheet.row(i);
+        String g(int c) => c >= 0 && c < row.length ? _s(row[c]).trim() : '';
+        if (g(cPan).isEmpty || g(cPwd).isEmpty) continue;
+        list.add(Acct(i, g(cPan).toUpperCase(), g(cPwd))..name = g(cName));
+      }
+      final dir = await getApplicationDocumentsDirectory();
+      setState(() {
+        excel = ex;
+        accts = list;
+        outPath = '${dir.path}/refund_results.xlsx';
+        logPath = '${dir.path}/refund_log.txt';
+      });
+      if (list.isEmpty) {
+        msg('0 PANs found. Row 1 headers: Name | PAN Card Number | Password. Data from row 2.');
+      } else {
+        msg('${list.length} accounts loaded');
+      }
+    } catch (e) {
+      msg('Could not read Excel: $e');
     }
-    final dir = await getApplicationDocumentsDirectory();
-    setState(() {
-      excel = ex;
-      accts = list;
-      outPath = '${dir.path}/refund_results.xlsx';
-      logPath = '${dir.path}/refund_log.txt';
-    });
-    msg('${list.length} accounts loaded');
   }
 
   Future<void> start(int i) async {
