@@ -734,7 +734,31 @@ class _HomeState extends State<Home> {
     await advance();
   }
 
+  // Date text -> DateTime (for sorting). Handles 15-03-2026, 2026-03-15, 15-Mar-2026.
+  DateTime? parseDate(String t) {
+    final m = RegExp(r'(\d{1,4})[-/. ](\d{1,2})[-/. ](\d{1,4})').firstMatch(t);
+    try {
+      if (m != null) {
+        final x = int.parse(m[1]!), y = int.parse(m[2]!), z = int.parse(m[3]!);
+        return m[1]!.length == 4 ? DateTime(x, y, z) : DateTime(z, y, x);
+      }
+      final n = RegExp(r'(\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ,]*(\d{4})')
+          .firstMatch(t);
+      if (n != null) {
+        const mons = [
+          'jan', 'feb', 'mar', 'apr', 'may', 'jun',
+          'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
+        ];
+        final mi = mons.indexOf(n[2]!.toLowerCase());
+        if (mi >= 0) return DateTime(int.parse(n[3]!), mi + 1, int.parse(n[1]!));
+      }
+    } catch (_) {}
+    return null;
+  }
+
   // Rebuild the result workbook from memory each save: never loses earlier rows.
+  // Order: rows with Date of Status first (latest first), then ISSUE rows,
+  // then remaining (pending). Each distinct status gets its own light colour.
   Future<void> writeResults() async {
     if (outPath == null) {
       final dir = await getApplicationDocumentsDirectory();
@@ -753,9 +777,55 @@ class _HomeState extends State<Home> {
       'Status',
       'Date of Status'
     ]));
-    for (final a in accts) {
-      s.appendRow(rowOf([a.name, a.pan, a.mobile, a.email, a.status, a.date]));
+    for (var c = 0; c < 6; c++) {
+      s.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0)).cellStyle =
+          CellStyle(
+              bold: true, backgroundColorHex: ExcelColor.fromHexString('#D9D9D9'));
     }
+    int rank(Acct a) {
+      if (a.status.isEmpty) return 2;
+      if (a.status.startsWith('ISSUE')) return 1;
+      return 0;
+    }
+
+    final sorted = List<Acct>.from(accts);
+    sorted.sort((a, b) {
+      final ra = rank(a), rb = rank(b);
+      if (ra != rb) return ra.compareTo(rb);
+      if (ra == 0) {
+        final da = parseDate(a.date), db = parseDate(b.date);
+        if (da != null && db != null) return db.compareTo(da);
+        if (da != null) return -1;
+        if (db != null) return 1;
+        return a.status.compareTo(b.status);
+      }
+      if (ra == 1) return a.status.compareTo(b.status);
+      return a.row.compareTo(b.row);
+    });
+    const palette = [
+      '#E2F0D9', '#DDEBF7', '#FFF2CC', '#EADCF4',
+      '#FCE4D6', '#D9F2F0', '#F8E1EC', '#E8EEF5'
+    ];
+    final colorOf = <String, String>{};
+    for (final a in sorted) {
+      s.appendRow(rowOf([a.name, a.pan, a.mobile, a.email, a.status, a.date]));
+      if (a.status.isEmpty) continue;
+      final key = a.status.toLowerCase().trim();
+      final hex = a.status.startsWith('ISSUE')
+          ? '#FFD6D6'
+          : colorOf.putIfAbsent(key, () => palette[colorOf.length % palette.length]);
+      final r = s.maxRows - 1;
+      for (var c = 0; c < 6; c++) {
+        s.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r))
+            .cellStyle = CellStyle(backgroundColorHex: ExcelColor.fromHexString(hex));
+      }
+    }
+    s.setColumnWidth(0, 24);
+    s.setColumnWidth(1, 18);
+    s.setColumnWidth(2, 16);
+    s.setColumnWidth(3, 28);
+    s.setColumnWidth(4, 45);
+    s.setColumnWidth(5, 16);
     final bytes = ex.save();
     if (bytes != null) await File(outPath!).writeAsBytes(bytes, flush: true);
   }
