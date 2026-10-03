@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:android_id/android_id.dart';
 import 'package:archive/archive.dart' as ar;
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -13,8 +15,135 @@ import 'package:xml/xml.dart' as xx;
 
 const loginUrl = 'https://eportal.incometax.gov.in/iec/foservices/#/login';
 
+// Approved phones list (one Device ID per line in approved.txt, public repo).
+const approvedUrl =
+    'https://raw.githubusercontent.com/kasiravi0137-svg/refund-access/main/approved.txt';
+
 void main() => runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false, home: Home()));
+    debugShowCheckedModeBanner: false, home: Gate()));
+
+class Gate extends StatefulWidget {
+  const Gate({super.key});
+  @override
+  State<Gate> createState() => _GateState();
+}
+
+class _GateState extends State<Gate> {
+  String id = '';
+  String note = '';
+  bool? ok;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  List<String> _parse(String t) => t
+      .split('\n')
+      .map((l) => l.split('#').first.trim().toLowerCase())
+      .where((l) => l.isNotEmpty)
+      .toList();
+
+  Future<String?> _fetch() async {
+    try {
+      final c = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      final u = Uri.parse(
+          '$approvedUrl?t=${DateTime.now().millisecondsSinceEpoch}');
+      final req = await c.getUrl(u);
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) {
+        c.close();
+        return null;
+      }
+      final body = await res.transform(utf8.decoder).join();
+      c.close();
+      return body;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _check() async {
+    setState(() => ok = null);
+    var d = '';
+    try {
+      d = (await const AndroidId().getId()) ?? '';
+    } catch (_) {}
+    d = d.toLowerCase();
+    var allowed = false;
+    var n = '';
+    final dir = await getApplicationDocumentsDirectory();
+    final cache = File('${dir.path}/approved_cache.txt');
+    final body = await _fetch();
+    if (body != null) {
+      try {
+        await cache.writeAsString(body, flush: true);
+      } catch (_) {}
+      allowed = d.isNotEmpty && _parse(body).contains(d);
+    } else {
+      // offline: use the last saved list, valid for 7 days
+      try {
+        if (cache.existsSync() &&
+            DateTime.now().difference(cache.lastModifiedSync()).inDays < 7) {
+          allowed = d.isNotEmpty &&
+              _parse(await cache.readAsString()).contains(d);
+        } else {
+          n = 'Internet is needed to verify this device.';
+        }
+      } catch (_) {
+        n = 'Internet is needed to verify this device.';
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      id = d;
+      note = n;
+      ok = allowed;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (ok == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (ok == true) return const Home();
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.lock, size: 56, color: Colors.red),
+            const SizedBox(height: 16),
+            const Text('This device is not authorised',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(
+                note.isEmpty
+                    ? 'Send this Device ID to the app owner to get access.'
+                    : note,
+                textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            SelectableText(id.isEmpty ? 'unknown' : id,
+                style: const TextStyle(fontSize: 16, fontFamily: 'monospace')),
+            const SizedBox(height: 12),
+            Wrap(spacing: 10, children: [
+              OutlinedButton(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Device ID copied')));
+                  },
+                  child: const Text('Copy Device ID')),
+              ElevatedButton(onPressed: _check, child: const Text('Retry')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+}
 
 class Acct {
   final int row;
